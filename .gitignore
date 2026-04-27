@@ -18,6 +18,8 @@ env/
 # Backend data/logs
 backend/.pytest_cache/
 backend/*.log
+data/app.db
+data/raw/
 
 # Node / frontend
 frontend/node_modules/
