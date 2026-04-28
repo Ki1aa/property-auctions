@@ -14,7 +14,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.models import OpenDataNotice
 
 
@@ -37,7 +37,6 @@ def import_dataset(dataset_path: Path, structure_path: Path) -> tuple[int, int, 
     if not isinstance(items, list):
         raise RuntimeError("Некорректный формат data-файла: ожидается listObjects[]")
 
-    Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     inserted = 0
     updated = 0
@@ -110,7 +109,7 @@ def resolve_paths(args: argparse.Namespace) -> tuple[Path, Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Импорт последнего data-*.json в БД с валидацией по structure-*.json."
+        description="Импорт последнего data-*.json в БД с валидацией по structure-*.json (после alembic upgrade head)."
     )
     parser.add_argument("--dataset-file", default="")
     parser.add_argument("--structure-file", default="")

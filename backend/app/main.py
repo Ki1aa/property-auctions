@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from app.api import router as api_router
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.models import IngestRun
 from app.schemas import HealthResponse
 from app.scheduler import scheduled_ingest, start_scheduler
@@ -17,7 +17,6 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 async def startup_event():
-    Base.metadata.create_all(bind=engine)
     start_scheduler()
     db = SessionLocal()
     try:
