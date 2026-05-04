@@ -5,10 +5,10 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Lot, Organizer
+from app.models import Lot, OpenDataNotice, Organizer
 
 
-def test_lots_list_and_map_endpoint():
+def _setup_inmemory_app():
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -25,6 +25,11 @@ def test_lots_list_and_map_endpoint():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    return TestingSessionLocal
+
+
+def test_lots_list_and_map_endpoint():
+    TestingSessionLocal = _setup_inmemory_app()
 
     db = TestingSessionLocal()
     organizer = Organizer(source_id="org-x", name="Орг")
@@ -53,3 +58,115 @@ def test_lots_list_and_map_endpoint():
     assert len(lots_response.json()) == 1
     assert map_response.status_code == 200
     assert len(map_response.json()) == 1
+
+
+def test_lots_filters_izhs_and_area():
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="lot-izhs",
+            title="ИЖС Тюмень",
+            status="active",
+            region="72",
+            category="ZK",
+            cadastral_number="72:23:0123456:7",
+            area_sqm=1200.0,
+            is_izhs_candidate=True,
+            start_price=1_000_000,
+        )
+    )
+    db.add(
+        Lot(
+            source_id="lot-other",
+            title="Не-ИЖС",
+            status="active",
+            region="77",
+            category="178FZ",
+            cadastral_number="77:01:0001234:5",
+            area_sqm=300.0,
+            is_izhs_candidate=False,
+            start_price=5_000_000,
+        )
+    )
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+
+    only_izhs = client.get("/api/lots", params={"is_izhs": "true"}).json()
+    assert [item["source_id"] for item in only_izhs] == ["lot-izhs"]
+
+    by_area = client.get("/api/lots", params={"min_area": 500}).json()
+    assert {item["source_id"] for item in by_area} == {"lot-izhs"}
+
+    by_max_price = client.get("/api/lots", params={"max_start_price": 2_000_000}).json()
+    assert {item["source_id"] for item in by_max_price} == {"lot-izhs"}
+
+    by_cadastral = client.get("/api/lots", params={"cadastral_number": "72:23"}).json()
+    assert [item["source_id"] for item in by_cadastral] == ["lot-izhs"]
+
+
+def test_lot_detail_returns_notice_payload_when_linked():
+    from sqlalchemy import select
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    notice = OpenDataNotice(
+        reg_num="72000000000000000123",
+        document_type="notice",
+        href="https://example.com/docs/notice_72000000000000000123_abc.json",
+        payload={"regNum": "72000000000000000123", "biddTypeCode": "ZK", "extra": "raw"},
+    )
+    db.add(notice)
+    db.flush()
+    notice_id = notice.id
+    db.add(
+        Lot(
+            source_id="lot-with-notice",
+            title="Лот с привязкой",
+            status="active",
+            region="72",
+            opendata_notice_id=notice_id,
+        )
+    )
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    response = client.get(f"/api/lots/{lot_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["opendata_notice_id"] == notice_id
+    assert body["notice_payload"] is not None
+    assert body["notice_payload"]["regNum"] == "72000000000000000123"
+    assert body["notice_payload"]["extra"] == "raw"
+
+
+def test_lot_detail_returns_null_notice_payload_when_not_linked():
+    from sqlalchemy import select
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="lot-naked",
+            title="Без notice",
+            status="active",
+            region="72",
+        )
+    )
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    response = client.get(f"/api/lots/{lot_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["opendata_notice_id"] is None
+    assert body["notice_payload"] is None

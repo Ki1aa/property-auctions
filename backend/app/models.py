@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -36,11 +36,27 @@ class Lot(Base):
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     organizer_id: Mapped[int | None] = mapped_column(ForeignKey("organizers.id"), nullable=True)
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Land-plot enrichment (filled from ГИС Торги notice detail JSON).
+    cadastral_number: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    land_category: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    permitted_use: Mapped[str | None] = mapped_column(Text, nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notice_detail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_izhs_candidate: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", index=True)
+
+    # Link to the raw OpenDataNotice record (when the lot came from opendata).
+    opendata_notice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("opendata_notices.id"), nullable=True, index=True
+    )
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     organizer: Mapped[Organizer | None] = relationship(back_populates="lots")
     snapshots: Mapped[list["LotSnapshot"]] = relationship(back_populates="lot")
+    opendata_notice: Mapped["OpenDataNotice | None"] = relationship(foreign_keys=[opendata_notice_id])
 
 
 class LotSnapshot(Base):
@@ -68,6 +84,26 @@ class IngestRun(Base):
     upserted_count: Mapped[int] = mapped_column(Integer, default=0)
     changed_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class IngestManifest(Base):
+    __tablename__ = "ingest_manifest"
+    __table_args__ = (UniqueConstraint("source_url", "sha256", name="uq_ingest_manifest_source_sha256"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    dataset_id: Mapped[str] = mapped_column(String(128), index=True)
+    source_url: Mapped[str] = mapped_column(Text)
+    structure_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    data_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    schema_version: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    downloaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    records_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AlertEvent(Base):

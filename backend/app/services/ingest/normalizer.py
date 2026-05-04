@@ -21,6 +21,36 @@ def parse_dt(value: str | None) -> datetime | None:
 
 
 def normalize_lot(item: dict[str, Any]) -> dict[str, Any]:
+    # OpenData notice dataset fallback fields
+    if "regNum" in item and "href" in item:
+        reg_num = str(_pick(item, "regNum") or "")
+        title = str(_pick(item, "noticeName", "estateObjectName") or f"Извещение {reg_num}" if reg_num else "Извещение")
+        right_holder = str(_pick(item, "rightHolderCode") or "")
+        bidder = str(_pick(item, "bidderOrgCode") or "")
+        organizer_code = right_holder or bidder or "unknown"
+
+        return {
+            "source_id": reg_num or str(_pick(item, "href") or ""),
+            "title": title,
+            "status": _pick(item, "documentType"),
+            "region": _pick(item, "subjectRFCode", "subjectRightHolderCode"),
+            "category": _pick(item, "biddTypeCode", "subjectEstateCode"),
+            "start_price": None,
+            "current_price": None,
+            "start_date": parse_dt(_pick(item, "publishDate")),
+            "end_date": None,
+            "latitude": None,
+            "longitude": None,
+            "source_url": _pick(item, "href"),
+            "organizer": {
+                "source_id": organizer_code,
+                "name": str(_pick(item, "rightHolderCode", "bidderOrgCode") or "Не указан"),
+                "inn": None,
+                "kpp": None,
+            },
+            "raw": item,
+        }
+
     organizer = _pick(item, "organizer", "owner", "seller") or {}
     location = _pick(item, "location", "address") or {}
 

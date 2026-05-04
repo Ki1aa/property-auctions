@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import IngestRun, Lot, OpenDataNotice, Organizer
 from app.schemas import IngestRunView, LotDetail, LotListItem, MapPoint, OpenDataNoticeListItem
+from typing import Any
 
 router = APIRouter(prefix="/api")
 
@@ -14,6 +15,11 @@ def list_lots(
     region: str | None = None,
     status: str | None = None,
     category: str | None = None,
+    is_izhs: bool | None = None,
+    min_area: float | None = None,
+    max_area: float | None = None,
+    max_start_price: float | None = None,
+    cadastral_number: str | None = None,
     limit: int = Query(default=100, le=1000),
     db: Session = Depends(get_db),
 ):
@@ -24,6 +30,16 @@ def list_lots(
         filters.append(Lot.status == status)
     if category:
         filters.append(Lot.category == category)
+    if is_izhs is not None:
+        filters.append(Lot.is_izhs_candidate.is_(is_izhs))
+    if min_area is not None:
+        filters.append(Lot.area_sqm >= min_area)
+    if max_area is not None:
+        filters.append(Lot.area_sqm <= max_area)
+    if max_start_price is not None:
+        filters.append(Lot.start_price <= max_start_price)
+    if cadastral_number:
+        filters.append(Lot.cadastral_number.ilike(f"%{cadastral_number}%"))
 
     stmt = select(Lot).order_by(desc(Lot.updated_at)).limit(limit)
     if filters:
@@ -42,6 +58,13 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Lot not found")
     lot, organizer = row
+
+    notice_payload: dict[str, Any] | None = None
+    if lot.opendata_notice_id is not None:
+        notice = db.scalar(select(OpenDataNotice).where(OpenDataNotice.id == lot.opendata_notice_id))
+        if notice is not None and isinstance(notice.payload, dict):
+            notice_payload = notice.payload
+
     return LotDetail(
         id=lot.id,
         source_id=lot.source_id,
@@ -58,6 +81,15 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         source_url=lot.source_url,
         organizer_name=organizer.name if organizer else None,
         organizer_inn=organizer.inn if organizer else None,
+        cadastral_number=lot.cadastral_number,
+        area_sqm=lot.area_sqm,
+        is_izhs_candidate=bool(lot.is_izhs_candidate),
+        land_category=lot.land_category,
+        permitted_use=lot.permitted_use,
+        address=lot.address,
+        notice_detail_url=lot.notice_detail_url,
+        opendata_notice_id=lot.opendata_notice_id,
+        notice_payload=notice_payload,
     )
 
 

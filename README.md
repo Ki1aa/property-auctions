@@ -1,5 +1,7 @@
 # Мониторинг ГИС Торги (MVP)
 
+> Контекст для AI-агентов: [AGENTS.md](AGENTS.md) - постоянный контекст и соглашения, [WORKLOG.md](WORKLOG.md) - журнал работ.
+
 Система загружает данные ГИС Торги, сохраняет данные в локальную БД SQLite (на этапе разработки), предоставляет API, отображает список извещений и поддерживает оповещения.
 
 ## Текущий режим разработки
@@ -38,6 +40,38 @@ npm run dev
    - Backend API: `http://localhost:8000`
    - Frontend: `http://localhost:5173`
    - Healthcheck: `GET http://localhost:8000/health`
+
+`INGEST_SOURCE_URL` поддерживает два формата:
+- URL карточки открытых данных (например, `.../new/public/opendata/...`);
+- прямой URL на `data-*.json`.
+
+Если указан URL карточки, backend автоматически извлекает ссылки на `data-*.json`, выбирает самую актуальную версию и загружает ее.
+
+## Discovery chain ingestion
+
+Ingestion использует 3 уровня discovery источника:
+
+1. **Primary:** `TORGI_OPENDATA_REGISTRY_URL` (машиночитаемый реестр `list.json`).
+2. **Fallback:** `TORGI_OPENDATA_CARD_URL` (HTML-карточка набора).
+3. **Fallback-2:** прямые `INGEST_SOURCE_URL` + `INGEST_STRUCTURE_URL`.
+
+Поддерживаются режимы:
+
+- `INGEST_MODE=operational` - ежедневная загрузка с догрузкой пропущенных дней по watermark.
+- `INGEST_MODE=backfill` - загрузка диапазона по `BACKFILL_FROM` / `BACKFILL_TO`.
+
+Каждый `data-*.json` обрабатывается только с соответствующей `structure-*.json`. Если версия структуры не поддерживается, файл сохраняется в raw и маркируется как `schema_migration_required` в `ingest_manifest`.
+
+## Backfill запуск
+
+Пример запуска backfill вручную:
+
+```bash
+cd backend
+python scripts/run_backfill_ingest.py --from-date 2026-04-01 --to-date 2026-04-10
+```
+
+Логи загрузок и идемпотентность фиксируются в таблице `ingest_manifest` (`source_url + sha256` не обрабатывается повторно).
 
 ## План по миграциям (к production)
 

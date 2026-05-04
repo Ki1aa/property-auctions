@@ -9,14 +9,18 @@ export function TradesPage() {
   const [biddTypeCode, setBiddTypeCode] = useState("");
   const [regNum, setRegNum] = useState("");
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
   async function load() {
     try {
       setError("");
-      const data = await fetchNotices({ documentType, biddTypeCode, regNum });
+      setIsLoading(true);
+      const data = await fetchNotices({ documentType, biddTypeCode, regNum, limit: 500 });
       setNotices(data);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -24,23 +28,33 @@ export function TradesPage() {
     void load();
   }, []);
 
-  return (
-    <main className="container">
-      <h1>Мониторинг ГИС Торги</h1>
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    void load();
+  }
 
-      <section className="filters">
+  function handleReset() {
+    setDocumentType("");
+    setBiddTypeCode("");
+    setRegNum("");
+    void load();
+  }
+
+  return (
+    <div className="page">
+      <h1>Извещения</h1>
+      <p className="page__subtitle">Найдено: {isLoading ? "…" : notices.length}</p>
+
+      <form className="filters" onSubmit={handleSubmit}>
         <input value={documentType} onChange={(e) => setDocumentType(e.target.value)} placeholder="Тип документа" />
         <input value={biddTypeCode} onChange={(e) => setBiddTypeCode(e.target.value)} placeholder="Вид торгов" />
         <input value={regNum} onChange={(e) => setRegNum(e.target.value)} placeholder="Реестровый номер" />
-        <button onClick={() => void load()}>Применить фильтры</button>
-      </section>
+        <button type="submit">Применить</button>
+        <button type="button" className="button button--ghost" onClick={handleReset}>Сбросить</button>
+      </form>
 
       {error && <p className="error">{error}</p>}
-
-      <section>
-        <h2>Список извещений</h2>
-        <TradesTable notices={notices} />
-      </section>
-    </main>
+      {isLoading ? <p className="loading">Загрузка…</p> : <TradesTable notices={notices} />}
+    </div>
   );
 }

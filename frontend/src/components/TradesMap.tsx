@@ -5,9 +5,13 @@ import { MapPoint } from "../types";
 
 type Props = {
   points: MapPoint[];
+  height?: string;
+  fitToPoints?: boolean;
 };
 
-export function TradesMap({ points }: Props) {
+const RU_CENTER: [number, number] = [73.0, 61.0];
+
+export function TradesMap({ points, height = "420px", fitToPoints = true }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -20,8 +24,8 @@ export function TradesMap({ points }: Props) {
     mapRef.current = new maplibregl.Map({
       container: mapContainerRef.current,
       style: "https://demotiles.maplibre.org/style.json",
-      center: [73.0, 61.0],
-      zoom: 4.5,
+      center: RU_CENTER,
+      zoom: 3,
     });
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -35,7 +39,8 @@ export function TradesMap({ points }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!mapRef.current) {
+    const map = mapRef.current;
+    if (!map) {
       return;
     }
 
@@ -50,11 +55,26 @@ export function TradesMap({ points }: Props) {
       const marker = new maplibregl.Marker({ color: "#d23f31" })
         .setLngLat([point.longitude, point.latitude])
         .setPopup(popup)
-        .addTo(mapRef.current);
+        .addTo(map);
 
       markersRef.current.push(marker);
     }
-  }, [points]);
 
-  return <div ref={mapContainerRef} style={{ height: "420px", width: "100%" }} />;
+    if (!fitToPoints || points.length === 0) {
+      return;
+    }
+
+    if (points.length === 1) {
+      map.flyTo({ center: [points[0].longitude, points[0].latitude], zoom: 11, essential: true });
+      return;
+    }
+
+    const bounds = new maplibregl.LngLatBounds();
+    for (const point of points) {
+      bounds.extend([point.longitude, point.latitude]);
+    }
+    map.fitBounds(bounds, { padding: 60, duration: 600, maxZoom: 9 });
+  }, [points, fitToPoints]);
+
+  return <div ref={mapContainerRef} style={{ height, width: "100%", borderRadius: "12px", overflow: "hidden" }} />;
 }

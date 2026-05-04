@@ -14,7 +14,7 @@ scheduler = AsyncIOScheduler()
 async def scheduled_ingest() -> None:
     db = SessionLocal()
     try:
-        await run_ingest(db)
+        await run_ingest(db, mode="operational")
     except Exception:  # noqa: BLE001
         logger.exception("Scheduled ingest failed")
     finally:

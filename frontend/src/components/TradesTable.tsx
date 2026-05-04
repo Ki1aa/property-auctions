@@ -1,10 +1,19 @@
 import { Notice } from "../types";
+import { StatusBadge } from "./StatusBadge";
 
 type Props = {
   notices: Notice[];
 };
 
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("ru-RU");
+}
+
 export function TradesTable({ notices }: Props) {
+  if (notices.length === 0) {
+    return <p className="empty">Извещений по фильтрам не найдено.</p>;
+  }
   return (
     <table className="table">
       <thead>
@@ -20,13 +29,11 @@ export function TradesTable({ notices }: Props) {
         {notices.map((notice) => (
           <tr key={notice.id}>
             <td>{notice.reg_num}</td>
-            <td>{notice.document_type || "—"}</td>
+            <td><StatusBadge status={notice.document_type} /></td>
             <td>{notice.bidd_type_code || "—"}</td>
-            <td>{notice.publish_date ? new Date(notice.publish_date).toLocaleString() : "—"}</td>
+            <td>{formatDate(notice.publish_date)}</td>
             <td>
-              <a href={notice.href} target="_blank" rel="noreferrer">
-                Открыть
-              </a>
+              <a href={notice.href} target="_blank" rel="noreferrer">Открыть</a>
             </td>
           </tr>
         ))}
