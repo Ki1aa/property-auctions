@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -55,7 +57,9 @@ def test_lots_list_and_map_endpoint():
     map_response = client.get("/api/lots-map")
 
     assert lots_response.status_code == 200
-    assert len(lots_response.json()) == 1
+    lots_body = lots_response.json()
+    assert lots_body["total"] == 1
+    assert len(lots_body["items"]) == 1
     assert map_response.status_code == 200
     assert len(map_response.json()) == 1
 
@@ -95,26 +99,74 @@ def test_lots_filters_izhs_and_area():
 
     client = TestClient(app)
 
-    only_izhs = client.get("/api/lots", params={"is_izhs": "true"}).json()
+    only_izhs = client.get("/api/lots", params={"is_izhs": "true"}).json()["items"]
     assert [item["source_id"] for item in only_izhs] == ["lot-izhs"]
 
-    by_area = client.get("/api/lots", params={"min_area": 500}).json()
+    by_area = client.get("/api/lots", params={"min_area": 500}).json()["items"]
     assert {item["source_id"] for item in by_area} == {"lot-izhs"}
 
-    by_max_price = client.get("/api/lots", params={"max_start_price": 2_000_000}).json()
+    by_max_price = client.get("/api/lots", params={"max_start_price": 2_000_000}).json()["items"]
     assert {item["source_id"] for item in by_max_price} == {"lot-izhs"}
 
-    by_cadastral = client.get("/api/lots", params={"cadastral_number": "72:23"}).json()
+    by_cadastral = client.get("/api/lots", params={"cadastral_number": "72:23"}).json()["items"]
     assert [item["source_id"] for item in by_cadastral] == ["lot-izhs"]
 
     by_categories = client.get(
         "/api/lots",
         params=[("category", "ZK"), ("category", "178FZ")],
-    ).json()
+    ).json()["items"]
     assert {item["source_id"] for item in by_categories} == {"lot-izhs", "lot-other"}
 
-    single_cat = client.get("/api/lots", params={"category": "ZK"}).json()
+    single_cat = client.get("/api/lots", params={"category": "ZK"}).json()["items"]
     assert [item["source_id"] for item in single_cat] == ["lot-izhs"]
+
+    izhs_row = next(i for i in only_izhs if i["source_id"] == "lot-izhs")
+    assert izhs_row["start_price_per_sqm"] is not None
+    assert abs(izhs_row["start_price_per_sqm"] - (1_000_000 / 1200.0)) < 0.02
+    assert izhs_row["start_price_per_sotka"] is not None
+    assert abs(izhs_row["start_price_per_sotka"] - (1_000_000 / 12.0)) < 0.02
+
+    paged = client.get("/api/lots", params={"limit": 1, "offset": 0}).json()
+    assert paged["total"] == 2
+    assert len(paged["items"]) == 1
+    p2 = client.get("/api/lots", params={"limit": 1, "offset": 1}).json()
+    assert len(p2["items"]) == 1
+    assert p2["items"][0]["source_id"] != paged["items"][0]["source_id"]
+
+    by_price_asc = client.get("/api/lots", params={"sort": "price_per_sotka_asc"}).json()["items"]
+    assert [item["source_id"] for item in by_price_asc] == ["lot-izhs", "lot-other"]
+    by_price_desc = client.get("/api/lots", params={"sort": "price_per_sotka_desc"}).json()["items"]
+    assert [item["source_id"] for item in by_price_desc] == ["lot-other", "lot-izhs"]
+
+    csv_r = client.get("/api/export/lots.csv", params={"is_izhs": "true"})
+    assert csv_r.status_code == 200
+    assert "lot-izhs" in csv_r.text
+    assert "source_url" in csv_r.text.split("\n")[0]
+
+    csv_categories = client.get(
+        "/api/export/lots.csv",
+        params=[("category", "ZK"), ("category", "178FZ")],
+    )
+    assert csv_categories.status_code == 200
+    assert "lot-izhs" in csv_categories.text
+    assert "lot-other" in csv_categories.text
+
+
+def test_query_limits_reject_non_positive_values():
+    _setup_inmemory_app()
+    client = TestClient(app)
+
+    cases = [
+        ("/api/lots", {"limit": 0}),
+        ("/api/lots", {"limit": -1}),
+        ("/api/export/lots.csv", {"max_rows": 0}),
+        ("/api/export/lots.csv", {"max_rows": -1}),
+        ("/api/ingest-runs", {"limit": 0}),
+        ("/api/opendata-notices", {"limit": 0}),
+    ]
+    for path, params in cases:
+        response = client.get(path, params=params)
+        assert response.status_code == 422
 
 
 def test_lot_facets_endpoint():
@@ -159,6 +211,7 @@ def test_opendata_notices_multi_filter_and_facets():
         OpenDataNotice(
             reg_num="r1",
             document_type="notice",
+            publish_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
             href="https://example.com/1",
             bidd_type_code="ZK",
             payload={},
@@ -168,6 +221,7 @@ def test_opendata_notices_multi_filter_and_facets():
         OpenDataNotice(
             reg_num="r2",
             document_type="protocol",
+            publish_date=datetime(2026, 5, 2, tzinfo=timezone.utc),
             href="https://example.com/2",
             bidd_type_code="178FZ",
             payload={},
@@ -185,13 +239,22 @@ def test_opendata_notices_multi_filter_and_facets():
         "/api/opendata-notices",
         params=[("bidd_type_code", "ZK"), ("bidd_type_code", "178FZ")],
     ).json()
-    assert {n["reg_num"] for n in both_bidd} == {"r1", "r2"}
+    assert both_bidd["total"] == 2
+    assert both_bidd["limit"] == 200
+    assert both_bidd["offset"] == 0
+    assert {n["reg_num"] for n in both_bidd["items"]} == {"r1", "r2"}
 
     both_doc = client.get(
         "/api/opendata-notices",
         params=[("document_type", "notice"), ("document_type", "protocol")],
     ).json()
-    assert {n["reg_num"] for n in both_doc} == {"r1", "r2"}
+    assert {n["reg_num"] for n in both_doc["items"]} == {"r1", "r2"}
+
+    first_page = client.get("/api/opendata-notices", params={"limit": 1, "offset": 0}).json()
+    second_page = client.get("/api/opendata-notices", params={"limit": 1, "offset": 1}).json()
+    assert first_page["total"] == 2
+    assert first_page["items"][0]["reg_num"] == "r2"
+    assert second_page["items"][0]["reg_num"] == "r1"
 
 
 def test_lot_detail_returns_notice_payload_when_linked():

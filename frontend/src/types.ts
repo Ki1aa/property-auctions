@@ -7,6 +7,15 @@ export type Notice = {
   href: string;
 };
 
+export type NoticeListPage = {
+  items: Notice[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type LotsSort = "updated_at_desc" | "price_per_sotka_asc" | "price_per_sotka_desc";
+
 export type Lot = {
   id: number;
   source_id: string;
@@ -21,6 +30,17 @@ export type Lot = {
   cadastral_number: string | null;
   area_sqm: number | null;
   is_izhs_candidate: boolean;
+  /** Rub per sotka (100 m²) from notice; not market valuation. */
+  start_price_per_sotka: number | null;
+  /** Rub per m² from notice. */
+  start_price_per_sqm: number | null;
+};
+
+export type LotListPage = {
+  items: Lot[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 export type LotDetail = Lot & {

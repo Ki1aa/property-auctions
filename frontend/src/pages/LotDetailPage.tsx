@@ -97,6 +97,14 @@ export function LotDetailPage() {
         <div className="card__row"><span className="card__label">Категория</span><span>{lot.category || "—"}</span></div>
         <div className="card__row"><span className="card__label">Стартовая цена</span><span>{formatPrice(lot.start_price)}</span></div>
         <div className="card__row"><span className="card__label">Текущая цена</span><span>{formatPrice(lot.current_price)}</span></div>
+        <div className="card__row">
+          <span className="card__label">Старт. цена за сотку</span>
+          <span title="100 м²; из извещения, не рыночная оценка">{formatPrice(lot.start_price_per_sotka)}</span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Старт. цена за м²</span>
+          <span title="Из извещения, не рыночная оценка">{formatPrice(lot.start_price_per_sqm)}</span>
+        </div>
         <div className="card__row"><span className="card__label">Дата начала</span><span>{formatDate(lot.start_date)}</span></div>
         <div className="card__row"><span className="card__label">Дата окончания</span><span>{formatDate(lot.end_date)}</span></div>
         <div className="card__row"><span className="card__label">Организатор</span><span>{lot.organizer_name || "—"}</span></div>

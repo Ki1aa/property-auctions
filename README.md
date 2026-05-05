@@ -102,11 +102,12 @@ alembic current
 ## Основные эндпоинты
 
 - `GET /health` - проверка доступности.
-- `GET /api/lots` - список лотов с фильтрами `region/status/category`.
+- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/category/is_izhs/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения, не рыночная оценка).
+- `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами и `sort`, параметр `max_rows` (по умолчанию 10000, макс. 50000).
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
 - `GET /api/ingest-runs` - история запусков загрузчика.
-- `GET /api/opendata-notices` - список извещений с фильтрами `document_type/bidd_type_code/reg_num`.
+- `GET /api/opendata-notices` - страница извещений: JSON `{ items, total, limit, offset }` с фильтрами `document_type/bidd_type_code/reg_num` и пагинацией `limit`/`offset`.
 
 ## Тесты
 

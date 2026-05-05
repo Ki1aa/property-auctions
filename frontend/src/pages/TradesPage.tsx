@@ -4,8 +4,18 @@ import { FacetMultiPicker } from "../components/FacetMultiPicker";
 import { TradesTable } from "../components/TradesTable";
 import { Notice, OpenDataNoticeFacets } from "../types";
 
+const PAGE_SIZE = 50;
+
+type NoticeFilters = {
+  documentTypes: string[];
+  biddTypeCodes: string[];
+  regNum: string;
+};
+
 export function TradesPage() {
   const [notices, setNotices] = useState<Notice[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [documentTypes, setDocumentTypes] = useState<string[]>([]);
   const [biddTypeCodes, setBiddTypeCodes] = useState<string[]>([]);
   const [regNum, setRegNum] = useState("");
@@ -23,17 +33,20 @@ export function TradesPage() {
     return Array.from(s).sort();
   }, [facets, biddTypeCodes]);
 
-  async function load() {
+  async function load(filters: NoticeFilters = { documentTypes, biddTypeCodes, regNum }, nextOffset = offset) {
     try {
       setError("");
       setIsLoading(true);
-      const data = await fetchNotices({
-        documentType: documentTypes.length ? documentTypes : undefined,
-        biddTypeCode: biddTypeCodes.length ? biddTypeCodes : undefined,
-        regNum: regNum.trim() || undefined,
-        limit: 500,
+      const page = await fetchNotices({
+        documentType: filters.documentTypes.length ? filters.documentTypes : undefined,
+        biddTypeCode: filters.biddTypeCodes.length ? filters.biddTypeCodes : undefined,
+        regNum: filters.regNum.trim() || undefined,
+        limit: PAGE_SIZE,
+        offset: nextOffset,
       });
-      setNotices(data);
+      setNotices(page.items);
+      setTotal(page.total);
+      setOffset(page.offset);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -53,20 +66,31 @@ export function TradesPage() {
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    void load();
+    void load({ documentTypes, biddTypeCodes, regNum }, 0);
   }
 
   function handleReset() {
+    const empty: NoticeFilters = { documentTypes: [], biddTypeCodes: [], regNum: "" };
     setDocumentTypes([]);
     setBiddTypeCodes([]);
     setRegNum("");
-    void load();
+    void load(empty, 0);
   }
+
+  function handlePage(nextOffset: number) {
+    void load(undefined, nextOffset);
+  }
+
+  const pageFrom = total === 0 ? 0 : offset + 1;
+  const pageTo = offset + notices.length;
 
   return (
     <div className="page">
       <h1>Извещения</h1>
-      <p className="page__subtitle">Найдено: {isLoading ? "…" : notices.length}</p>
+      <p className="page__subtitle">
+        Найдено: {isLoading ? "…" : total}
+        {!isLoading && total > 0 ? ` · записи ${pageFrom}—${pageTo}` : ""}
+      </p>
 
       <form className="filters filters--grid" onSubmit={handleSubmit}>
         {docOptions.length > 0 && (
@@ -97,6 +121,26 @@ export function TradesPage() {
       </form>
 
       {error && <p className="error">{error}</p>}
+      {!isLoading && total > PAGE_SIZE ? (
+        <div className="pagination">
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={offset === 0}
+            onClick={() => handlePage(Math.max(0, offset - PAGE_SIZE))}
+          >
+            Назад
+          </button>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={offset + PAGE_SIZE >= total}
+            onClick={() => handlePage(offset + PAGE_SIZE)}
+          >
+            Вперёд
+          </button>
+        </div>
+      ) : null}
       {isLoading ? <p className="loading">Загрузка…</p> : <TradesTable notices={notices} />}
     </div>
   );

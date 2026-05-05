@@ -28,6 +28,12 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # When true, Telegram alerts are sent only for lots with is_izhs_candidate.
+    telegram_alert_only_izhs: bool = False
+
+    # If true, run one operational ingest when ingest_runs is empty (dev convenience).
+    # Set false in production to avoid heavy work on process start.
+    run_ingest_on_startup: bool = False
 
 
 settings = Settings()

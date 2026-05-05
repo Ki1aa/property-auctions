@@ -29,19 +29,19 @@ export function DashboardPage() {
     async function load() {
       setIsLoading(true);
       try {
-        const [lots, notices, runs] = await Promise.all([
-          fetchLots({ limit: 1000 }),
-          fetchNotices({ limit: 10 }),
+        const [lotsPage, noticesPage, runs] = await Promise.all([
+          fetchLots({ limit: 5, offset: 0 }),
+          fetchNotices({ limit: 5, offset: 0 }),
           fetchIngestRuns(1),
         ]);
         if (cancelled) return;
         setMetrics({
-          lotsCount: lots.length,
-          noticesCount: notices.length,
+          lotsCount: lotsPage.total,
+          noticesCount: noticesPage.total,
           lastRun: runs[0] ?? null,
         });
-        setRecentNotices(notices.slice(0, 5));
-        setRecentLots(lots.slice(0, 5));
+        setRecentNotices(noticesPage.items);
+        setRecentLots(lotsPage.items);
         setError("");
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -68,7 +68,7 @@ export function DashboardPage() {
           <Link className="metric__link" to="/lots">Перейти к списку →</Link>
         </div>
         <div className="metric">
-          <span className="metric__label">Извещений (последние 10)</span>
+          <span className="metric__label">Извещений в базе</span>
           <span className="metric__value">{isLoading ? "…" : metrics.noticesCount ?? "—"}</span>
           <Link className="metric__link" to="/notices">Все извещения →</Link>
         </div>
@@ -102,10 +102,10 @@ export function DashboardPage() {
             <tbody>
               {recentNotices.map((notice) => (
                 <tr key={notice.id}>
-                  <td>{notice.reg_num}</td>
+                  <td className="cell--mono cell--nowrap">{notice.reg_num}</td>
                   <td><StatusBadge status={notice.document_type} /></td>
                   <td>{notice.bidd_type_code || "—"}</td>
-                  <td>{formatDate(notice.publish_date)}</td>
+                  <td className="cell--nowrap">{formatDate(notice.publish_date)}</td>
                 </tr>
               ))}
             </tbody>
@@ -133,7 +133,9 @@ export function DashboardPage() {
             <tbody>
               {recentLots.map((lot) => (
                 <tr key={lot.id}>
-                  <td><Link to={`/lots/${lot.id}`}>{lot.title}</Link></td>
+                  <td className="cell--name">
+                    <Link to={`/lots/${lot.id}`}>{lot.title}</Link>
+                  </td>
                   <td><StatusBadge status={lot.status} /></td>
                   <td>{lot.region || "—"}</td>
                   <td>{lot.category || "—"}</td>

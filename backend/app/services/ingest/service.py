@@ -48,6 +48,17 @@ def _is_torgi_opendata_error_envelope(payload: Any) -> bool:
     return len(_pick_items(payload)) == 0
 
 
+def _friendly_ingest_error(*, error: str, source_url: str | None = None) -> str:
+    lowered = error.lower()
+    if "torgi opendata:" in lowered:
+        url_part = f" ({source_url})" if source_url else ""
+        return (
+            "Источник Torgi временно не отдает один из файлов (срез еще не опубликован или недоступен)."
+            f"{url_part} Попробуйте повторить позже."
+        )
+    return error
+
+
 def _supported_structure_versions() -> set[str]:
     values = [item.strip() for item in settings.supported_structure_versions.split(",")]
     return {item for item in values if item}
@@ -206,6 +217,8 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     changed_count = 0
     processed_files = 0
     failed_files = 0
+    last_failed_url: str | None = None
+    last_error: str | None = None
     detail_fetch_count = 0
     allowed_regions = _target_region_codes()
     izhs_keywords = split_keywords(settings.izhs_keywords)
@@ -278,6 +291,8 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                 processed_files += 1
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Ingest file failed: %s", file_ref.source_url)
+                last_failed_url = file_ref.source_url
+                last_error = str(exc)
                 _write_manifest(
                     db,
                     file_ref=file_ref,
@@ -303,7 +318,11 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
         run.changed_count = changed_count
         run.finished_at = datetime.now(timezone.utc)
         if failed_files > 0:
-            run.error_message = f"Files processed={processed_files}, failed={failed_files}"
+            if last_error:
+                friendly = _friendly_ingest_error(error=last_error, source_url=last_failed_url)
+                run.error_message = f"{friendly} (processed={processed_files}, failed={failed_files})"
+            else:
+                run.error_message = f"processed={processed_files}, failed={failed_files}"
         elif run.status == "noop":
             run.error_message = "No new files to process (already ingested)."
         db.commit()

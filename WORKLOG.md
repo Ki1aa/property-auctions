@@ -6,6 +6,234 @@
 
 ---
 
+## 2026-05-05 - План делегирования для ИИ с доступом к РФ-ресурсам
+
+**Что сделано:**
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) дополнен разделом «0. Делегирование ИИ с прямым доступом к РФ-ресурсам».
+- Раздел описывает правила работы внешнего агента, который не зависит от VPN и может ходить на `torgi.gov.ru`, `nspd.gov.ru` и потенциально рыночные сайты.
+- Сформированы конкретные задачи для делегирования:
+  - обновить свежие OpenData-файлы Торгов через `fetch_latest_opendata.py`;
+  - выполнить live-верификацию `detail_parser` на окне 10 дней;
+  - проверить live ingest на малом/контролируемом прогоне;
+  - провести НСПД discovery по 20-30 кадастровым номерам;
+  - предварительно разведать доступность Циан/Авито/Домклик без массового парсинга.
+- Для каждой задачи указаны команды, ожидаемые артефакты и что нужно вернуть обратно в этот репозиторий.
+- Приоритет следующего рабочего захода в плане разделён на две дорожки: внешний ИИ с российским IP и текущий Codex/VPN-окружение.
+
+**Затронутые файлы:**
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `git diff HEAD --check`: планируется после записи; кодовые проверки не требуются, потому что изменена только документация.
+
+**Известные проблемы / TODO:**
+- Нужно получить от внешнего агента свежие `data-*.json`, live coverage report и НСПД samples, чтобы продолжить работу над parser/кадастровым слоем.
+
+**Следующее:**
+- Передать внешнему ИИ задачи A/B из `DEVELOPMENT_PLAN.md`, затем импортировать его артефакты в `data/raw/` и обновить WORKLOG фактическими результатами.
+
+---
+
+## 2026-05-05 - Server-side пагинация извещений OpenData
+
+**Что сделано:**
+- Backend: `/api/opendata-notices` переведён с массива на страницу `{ items, total, limit, offset }`; добавлен query-параметр `offset`, `limit` оставлен с `ge=1` / `le=1000`.
+- Backend schemas: добавлен `OpenDataNoticeListPage`.
+- Backend tests: обновлены ожидания фильтров извещений под новый page-ответ, добавлена проверка пагинации по `limit=1` / `offset`.
+- Frontend API/types: `fetchNotices` теперь возвращает `NoticeListPage`, добавлен тип `NoticeListPage`.
+- Frontend Dashboard: метрика извещений теперь берёт `total` из `/api/opendata-notices`, а список последних извещений — `items`.
+- Frontend Notices: добавлена server-side пагинация по 50 записей, отображение общего количества и диапазона записей.
+- Документация: обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+- Сетевые запросы к `torgi.gov.ru` не выполнялись; задача полностью локальная.
+
+**Затронутые файлы:**
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/tests/test_api.py
+- frontend/src/api.ts
+- frontend/src/types.ts
+- frontend/src/pages/DashboardPage.tsx
+- frontend/src/pages/TradesPage.tsx
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 46 passed, 2 warnings про deprecated FastAPI `on_event`.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло без ошибок.
+- `npm.cmd run build` в `frontend/`: прошло, есть ожидаемое предупреждение о крупном chunk из-за maplibre.
+- `git diff HEAD --check`: прошло без ошибок, есть только предупреждения Git о будущей CRLF-нормализации изменённых файлов.
+
+**Известные проблемы / TODO:**
+- Страница Notices пока не синхронизирует фильтры/offset с URL, в отличие от Lots.
+- Frontend test runner всё ещё не добавлен.
+
+**Следующее:**
+- Улучшить наблюдаемость ingest: `processed_files`, `failed_files`, последний `source_url` ошибки и более явное различение временной недоступности источника от настоящей ошибки схемы.
+
+---
+
+## 2026-05-05 - Пункт 2 плана: проверка ingest-надежности без доступа к Торгам
+
+**Что сделано:**
+- Попытка обновить свежий opendata-указатель через `python scripts/fetch_latest_opendata.py` не удалась: `httpx.ConnectTimeout [WinError 10060]` при обращении к `https://torgi.gov.ru/new/public/opendata/...`.
+- Малый live-прогон `verify_detail_parser_window.py --days 1 --limit-per-day 5` также не получил данные: `processed_days=0/1`, внутри daily-прогона `httpx.ConnectError: All connection attempts failed`.
+- Чтобы не перезаписывать старые daily-отчёты, live-attempt запускался в отдельный `tmp-dir`: `data/raw/live_attempt_20260505`; итоговый JSON: `data/raw/detail_parser_window_verification_live_attempt_20260505.json`.
+- Выполнен офлайн-пересчёт существующих daily-отчётов: `verify_detail_parser_window.py --reanalyze-existing --days 5`, артефакт `data/raw/detail_parser_window_reanalyze_existing_20260505.json`.
+- Итог офлайн-пересчёта: 5/5 дней, 295 fetched / 294 successful / 1 failed; field coverage sum: cadastral_number 171, area_sqm 112, land_category 294, permitted_use 164, address 291, lot_name 294, start_price 196.
+- Сегмент `is_land_plot=true` (n=160): cadastral_number 112, area_sqm 107, permitted_use 159, start_price 62.
+- `link_lots_to_notices.py --dry-run`: новых совпадений нет (`linked_via_href=0`, `linked_via_reg_num=0`), поэтому apply-прогон не запускался. Текущее состояние БД: lots_total 5207, lots_linked 2289, lots_unlinked 2918, notices_total 2419.
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) обновлён фактическими результатами пункта 2.
+
+**Затронутые файлы:**
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+- data/raw/detail_parser_window_verification_live_attempt_20260505.json (артефакт, gitignored)
+- data/raw/detail_parser_window_reanalyze_existing_20260505.json (артефакт, gitignored)
+- data/raw/link_lots_to_notices_dry_run_20260505.json (артефакт, gitignored)
+
+**Проверки:**
+- `python scripts/fetch_latest_opendata.py`: не прошло из-за сетевого timeout к `torgi.gov.ru`.
+- `python scripts/verify_detail_parser_window.py --days 1 --limit-per-day 5 --tmp-dir ..\data\raw\live_attempt_20260505 --output ..\data\raw\detail_parser_window_verification_live_attempt_20260505.json`: завершилось, но processed_days=0/1 из-за `ConnectError`.
+- `python scripts/verify_detail_parser_window.py --reanalyze-existing --days 5 --tmp-dir ..\data\raw --output ..\data\raw\detail_parser_window_reanalyze_existing_20260505.json`: прошло.
+- `python scripts/link_lots_to_notices.py --dry-run --output ..\data\raw\link_lots_to_notices_dry_run_20260505.json`: прошло, новых link-кандидатов 0.
+
+**Известные проблемы / TODO:**
+- Live-верификация parser coverage невозможна, пока VPN ведёт через иностранный IP или `torgi.gov.ru` недоступен.
+- 2918 лотов остаются без `opendata_notice_id`; текущий matching по `href` / `reg_num` новых пар не находит.
+
+**Следующее:**
+- Продолжить локальную часть пункта 2: полноценная пагинация `/api/opendata-notices` и улучшение наблюдаемости ingest без обращения к Торгам.
+
+---
+
+## 2026-05-05 - Стабилизация API и UI после ревизии
+
+**Что сделано:**
+- Backend: добавлены нижние границы `ge=1` для query-лимитов `/api/lots`, `/api/export/lots.csv`, `/api/ingest-runs`, `/api/opendata-notices`, чтобы нулевые/отрицательные значения не уходили в SQL.
+- Backend tests: добавлены проверки 422 для невалидных лимитов, сортировки `/api/lots` по `price_per_sotka` и CSV export с несколькими `category`.
+- Frontend: исправлен reset фильтров на странице извещений — таблица перезагружается с явно пустыми фильтрами, без stale state.
+- Frontend: страница лотов теперь восстанавливает применённые фильтры/сортировку/offset из URL и обновляет URL при пагинации/смене сортировки; CSV export строится по применённым query-параметрам.
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) обновлён: первый стабилизационный блок отмечен как выполненный, кроме будущего frontend test runner.
+- Live-загрузка с `torgi.gov.ru` не запускалась: пользователь предупредил, что из-за VPN доступ к российским государственным сайтам, скорее всего, заблокирован.
+
+**Затронутые файлы:**
+- backend/app/api.py
+- backend/tests/test_api.py
+- frontend/src/pages/TradesPage.tsx
+- frontend/src/pages/LotsPage.tsx
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 46 passed, 2 warnings про deprecated FastAPI `on_event`.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло без ошибок.
+- `npm.cmd run build` в `frontend/`: прошло, есть ожидаемое предупреждение о крупном chunk из-за maplibre.
+- `git diff HEAD --check`: прошло без ошибок, есть только предупреждения Git о будущей CRLF-нормализации изменённых файлов.
+
+**Известные проблемы / TODO:**
+- Frontend test runner пока не добавлен; reset-фильтры покрыты только ручной логикой и TypeScript/build-проверкой.
+- FastAPI startup hooks всё ещё на deprecated `@app.on_event`; перенос на lifespan остаётся техническим TODO.
+- Пагинация `/api/opendata-notices` всё ещё только через `limit`; полноценный `{ items, total, limit, offset }` остаётся следующим backend-шагом.
+
+**Следующее:**
+- Продолжить план с локальных задач, не требующих доступа к Торгам: server-side пагинация `/api/opendata-notices`, затем улучшение наблюдаемости ingest.
+
+---
+
+## 2026-05-05 - Ревизия кода и план дальнейшего развития
+
+**Что сделано:**
+- Проведена ревизия текущего backend/frontend состояния после MVP-итераций с пагинацией лотов, CSV export, расчетом ₽/сотка, startup-ingest по флагу и CI.
+- Создан [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) с этапами развития: стабилизация, надежность ingest, НСПД, baseline-оценка, рыночные аналоги, инвестиционный скоринг, smart-алерты, production-подготовка.
+- Нормализовано форматирование [frontend/src/api.ts](frontend/src/api.ts): удалены лишние CR/trailing whitespace, текущий diff относительно `HEAD` проходит whitespace-check.
+- Зафиксированы найденные риски для ближайшего исправления:
+  - API принимает отрицательные `limit` / `max_rows`, потому что задан только верхний предел;
+  - сброс фильтров на странице извещений вызывает `load()` до применения нового React state;
+  - пагинация и сортировка лотов меняют таблицу, но не всегда синхронизируют URL.
+
+**Затронутые файлы:**
+- DEVELOPMENT_PLAN.md (новый)
+- frontend/src/api.ts
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 45 passed, 2 warnings про deprecated FastAPI `on_event`.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло без ошибок.
+- `npm.cmd run build` в `frontend/`: прошло, есть ожидаемое предупреждение о крупном chunk из-за maplibre.
+- `git diff HEAD --check`: прошло без ошибок, есть только предупреждения Git о будущей CRLF-нормализации `WORKLOG.md` и `frontend/src/api.ts`.
+- Примечание: прямой `pytest` не увидел пакет `app` в этой оболочке, а `npx tsc --noEmit` через `npx.ps1` заблокирован PowerShell ExecutionPolicy; рабочие команды выше.
+
+**Известные проблемы / TODO:**
+- Исправить найденные при ревизии P2/P3-пункты из `DEVELOPMENT_PLAN.md`.
+- Перевести FastAPI startup hooks на lifespan при ближайшей технической итерации.
+
+**Следующее:**
+- Начать со стабилизации: нижние границы query-лимитов, reset фильтров извещений, URL-sync пагинации/сортировки лотов.
+
+---
+
+## 2026-05-05 - MVP-итерация: пагинация лотов, ₽/сотка, CSV, старт ingest по флагу, CI
+
+**Что сделано:**
+- Backend: `GET /api/lots` возвращает `LotListPage` (`items`, `total`, `limit`, `offset`), параметры `offset`, `sort` (`updated_at_desc` | `price_per_sotka_asc` | `price_per_sotka_desc`); в списке и в `LotDetail` — вычисляемые `start_price_per_sotka` / `start_price_per_sqm` (из извещения, 1 сотка = 100 м²).
+- `GET /api/export/lots.csv` — выгрузка с теми же фильтрами и сортировкой, UTF-8 BOM, лимит строк `max_rows`.
+- `RUN_INGEST_ON_STARTUP` (по умолчанию `false`) и `TELEGRAM_ALERT_ONLY_IZHS` в [backend/app/config.py](backend/app/config.py); стартовый ingest только при флаге [backend/app/main.py](backend/app/main.py); в [.env.example](.env.example) для dev указано `RUN_INGEST_ON_STARTUP=true`.
+- Telegram: при `TELEGRAM_ALERT_ONLY_IZHS=true` события для не-ИЖС лотов не отправляются [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py).
+- Frontend: `fetchLots` → `LotListPage`, дашборд считает `total` без выборки 1000 строк; страница лотов — пагинация по 50, сортировка, ссылка «Скачать CSV», колонка ₽/сотка; карточка лота — две строки метрик.
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml): pytest (backend) и `tsc --noEmit` (frontend) на push/PR.
+- Документация: [README.md](README.md), [AGENTS.md](AGENTS.md).
+
+**Затронутые файлы:**
+- backend/app/api.py, backend/app/schemas.py, backend/app/config.py, backend/app/main.py
+- backend/app/services/alerts/service.py
+- backend/tests/test_api.py
+- frontend/src/api.ts, frontend/src/types.ts, frontend/src/pages/LotsPage.tsx, frontend/src/pages/DashboardPage.tsx, frontend/src/pages/LotDetailPage.tsx, frontend/src/components/LotsTable.tsx, frontend/src/styles.css
+- .env.example, .github/workflows/ci.yml, README.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `pytest` в `backend/`
+- `npx tsc --noEmit` в `frontend/`
+
+**Известные проблемы / TODO:**
+- Пагинация `/api/opendata-notices` не делалась.
+
+**Следующее:**
+- При первом запуске без записей в `ingest_runs` и с `RUN_INGEST_ON_STARTUP=false` дождаться планового job или запустить ingest вручную.
+
+---
+
+## 2026-05-05 - UI: переносы текста и защита от «вылетов» в таблицах/карточке
+
+**Что сделано:**
+- Исправлено отображение длинных сообщений об ошибках в истории ingest: ячейка «Ошибка» больше не обрезается в одну строку, длинные URL переносятся.
+- Уплотнение таблицы «Загрузки данных»: даты/числа зафиксированы в `nowrap`, числовые колонки выровнены вправо, колонке ошибки задан бюджет ширины.
+- Защита карточки лота от длинных значений (адрес/ВРИ/ссылки): добавлены корректные flex-настройки и переносы.
+- В таблице лотов длинные названия больше не «раздвигают» таблицу; бейдж «ИЖС» переносится при дефиците места.
+- Для `reg_num` и дат в таблицах извещений добавлены `mono` + `nowrap`, чтобы длинные номера не ломали вёрстку.
+
+**Затронутые файлы:**
+- frontend/src/styles.css
+- frontend/src/pages/IngestRunsPage.tsx
+- frontend/src/components/LotsTable.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/components/TradesTable.tsx
+- frontend/src/pages/DashboardPage.tsx
+- WORKLOG.md
+
+**Проверки:**
+- —
+
+**Известные проблемы / TODO:**
+- —
+
+**Следующее:**
+- при необходимости: пройтись по оставшимся таблицам и навесить `cell--nowrap` на даты/идентификаторы при жалобах на переносы.
+
+---
+
 ## 2026-05-05 - Чистка ingest_manifest, перезапуск API, ручной ingest, верификация detail_parser
 
 **Что сделано:**

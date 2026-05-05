@@ -28,10 +28,10 @@ export function TradesTable({ notices }: Props) {
       <tbody>
         {notices.map((notice) => (
           <tr key={notice.id}>
-            <td>{notice.reg_num}</td>
+            <td className="cell--mono cell--nowrap">{notice.reg_num}</td>
             <td><StatusBadge status={notice.document_type} /></td>
             <td>{notice.bidd_type_code || "—"}</td>
-            <td>{formatDate(notice.publish_date)}</td>
+            <td className="cell--nowrap">{formatDate(notice.publish_date)}</td>
             <td>
               <a href={notice.href} target="_blank" rel="noreferrer">Открыть</a>
             </td>

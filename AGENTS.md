@@ -55,7 +55,7 @@
 backend/
   app/
     main.py            # FastAPI app, CORS, startup-хуки, авто-create_all
-    api.py             # все REST-эндпоинты (/api/lots, /api/lots/facets, /api/lots/{id}, /api/lots-map, /api/ingest-runs, /api/opendata-notices, /api/opendata-notices/facets)
+    api.py             # все REST-эндпоинты (/api/lots пагинация+CSV export, /api/lots/facets, /api/lots/{id}, /api/lots-map, /api/ingest-runs, /api/opendata-notices пагинация, /api/opendata-notices/facets)
     models.py          # SQLAlchemy: Organizer, Lot, LotSnapshot, IngestRun, IngestManifest, AlertEvent, OpenDataNotice
     schemas.py         # Pydantic-схемы ответов API
     config.py          # Settings (pydantic-settings, читает корневой .env)
@@ -93,8 +93,8 @@ frontend/
   src/
     main.tsx           # точка входа, BrowserRouter
     App.tsx            # <Routes>: /, /notices, /lots, /lots/:id, /map, /ingest
-    api.ts             # fetch-обёртки: fetchNotices, fetchOpenDataNoticeFacets, fetchLots, fetchLotFacets, fetchLot, fetchMapPoints, fetchIngestRuns
-    types.ts           # Notice, Lot, LotDetail, MapPoint, IngestRun
+    api.ts             # fetch-обёртки + buildLotsExportUrl; fetchLots → LotListPage, fetchNotices → NoticeListPage
+    types.ts           # Notice, NoticeListPage, Lot, LotListPage, LotDetail, MapPoint, IngestRun
     facetFilterUi.ts   # порог числа значений фасетов для одиночного `<select>` vs свободный ввод
     styles.css         # CSS-переменные + классы layout/table/badge/card
     vite-env.d.ts
@@ -191,7 +191,7 @@ flowchart LR
 - Watermark: в `operational` режиме старт = `max(IngestManifest.data_to)` для провайдера/датасета.
 - Schema versioning: только `SUPPORTED_STRUCTURE_VERSIONS` (по умолчанию `20240401`) обрабатываются; остальные сохраняются в raw и помечаются `schema_migration_required`.
 - Операционный ingest: план файлов — только окно watermark от последнего `data_to` (без полного слияния с историческим списком из реестра), иначе сортировка начиналась бы с самых старых срезов.
-- На стартe backend, если `ingest_runs` пуст, автоматически запускается ingest (`@app.on_event("startup")` в [backend/app/main.py](backend/app/main.py)). В продакшене это надо будет отключить. Долго висящие `IngestRun` в `running` закрываются при старте как прерванные.
+- На старте backend при `RUN_INGEST_ON_STARTUP=true` и пустом `ingest_runs` запускается один operational ingest (`@app.on_event("startup")` в [backend/app/main.py](backend/app/main.py)). По умолчанию в [backend/app/config.py](backend/app/config.py) флаг `false`; в [.env.example](.env.example) для локального dev указано `true`. Долго висящие `IngestRun` в `running` закрываются при старте как прерванные.
 
 ---
 
@@ -297,19 +297,18 @@ python scripts/repair_poisoned_ingest_manifests.py
 - **Retry detail-fetch**: один retry с backoff 1.5s в `_fetch_detail_with_retry` ([backend/app/services/ingest/service.py](backend/app/services/ingest/service.py)).
 - **ИЖС-детектор** через keyword match (`IZHS_KEYWORDS`).
 - **Связь Lot ↔ OpenDataNotice**: FK `Lot.opendata_notice_id`, ingest пишет обе таблицы атомарно, `/api/lots/{id}` возвращает `notice_payload` (raw opendata-извещение) - [backend/app/models.py](backend/app/models.py), [backend/app/api.py](backend/app/api.py).
-- REST API: `/health`, `/api/lots` (+ фильтры; `category` повторяющимся query для OR по видам торгов), `/api/lots/facets` (distinct `category` / `status` / `region`), `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`), `/api/lots-map`, `/api/ingest-runs`, `/api/opendata-notices` (`document_type` / `bidd_type_code` — списки; `reg_num` — точное совпадение), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
+- REST API: `/health`, `/api/lots` (ответ `{ items, total, limit, offset }`; фильтры; `sort`; `start_price_per_sotka` / `start_price_per_sqm` из извещения; `category` повторяющимся query для OR по видам торгов), `GET /api/export/lots.csv` (те же фильтры), `/api/lots/facets`, `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`), `/api/lots-map`, `/api/ingest-runs`, `/api/opendata-notices` (ответ `{ items, total, limit, offset }`; фильтры `document_type` / `bidd_type_code` списками и `reg_num`), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
 - Планировщик ingest (APScheduler, по умолчанию раз в сутки) - [backend/app/scheduler.py](backend/app/scheduler.py).
-- Telegram-уведомления (заглушка с дедупликацией через AlertEvent) - [backend/app/services/alerts/](backend/app/services/alerts).
-- Pytest: 45 тестов (API + notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены).
-- SPA: страницы Dashboard / Notices (тип документа и вид торгов — всплывающий мультивыбор с чекбоксами и «Применить»; `reg_num` — только текст) / Lots (регион и тип документа — одиночный `<select>` при малом числе значений фасетов; вид торгов — тот же мультивыбор; площадь/цена/кадастр, ИЖС, deep-link с `category=`) / LotDetail / Map / IngestRuns - [frontend/src/](frontend/src).
+- Telegram-уведомления (дедупликация через AlertEvent; опционально только ИЖС — `TELEGRAM_ALERT_ONLY_IZHS`) - [backend/app/services/alerts/](backend/app/services/alerts).
+- Pytest: 45+ тестов (API + notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены).
+- SPA: страницы Dashboard / Notices (server-side пагинация по 50, фильтры document_type / bidd_type_code / reg_num) / Lots (пагинация, сортировка по ₽/сотка, CSV, регион/тип — как раньше) / LotDetail / Map / IngestRuns - [frontend/src/](frontend/src).
 - TypeScript-проверка чистая, Vite production build проходит.
 
 **Не сделано / на паузе:**
 - НСПД, Циан/Авито/Домклик - не подключены (нужна сеть к этим хостам, сейчас VPN-on блокирует).
 - Нет оценки рыночной стоимости и инвестиционного скоринга.
-- Server-side пагинация (везде только `limit`).
 - Telegram реально не настроен (`.env` содержит пустые `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`).
-- Нет линтеров/CI.
+- Нет линтеров в CI (есть минимальный workflow: pytest + tsc).
 - Frontend не имеет тестов и error boundary.
 - Реальный замер выигрыша coverage от текстовых fallback'ов парсера возможен только при VPN-off.
 - 2941 существующих лота не слинкованы с notices (исторические записи до общей точки записи). Выровняется автоматически после нескольких live-ingest проходов.
@@ -326,10 +325,11 @@ python scripts/repair_poisoned_ingest_manifests.py
 4. **Оценка по аналогам**: алгоритм медианы ₽/сотка с поправками. Модель `Valuation`.
 5. **Скоринг инвестиционной привлекательности**: формула `discount_to_market * liquidity * location_score - risk`. Колонка `investment_score` в API и фронте, сортировка/фильтр по нему. Возможен v0 без рынка (₽/сотка по региону/ВРИ как baseline).
 6. **Smart-алерты**: пуш в Telegram только при `score >= threshold`, а не на любое изменение лота.
-7. **Server-side пагинация** в `/api/lots` и `/api/opendata-notices`.
+7. **Наблюдаемость ingest**: показывать `processed_files`, `failed_files`, последний `source_url` ошибки; различать временную недоступность источника и настоящую ошибку схемы.
 8. **PostgreSQL prod-сетап**: переключить `DATABASE_URL`, отключить `create_all()`, поднять docker-compose с реальной БД, прогнать `alembic upgrade head`.
-9. **CI**: GitHub Actions - lint (ruff, eslint) + pytest + tsc на каждый push.
+9. **CI**: расширить GitHub Actions — ruff, eslint (сейчас pytest + tsc).
 10. **Frontend code-splitting** карты (`React.lazy` для `MapPage`), error boundary.
 11. **Авито/Домклик** как дополнительные источники аналогов.
 
 Закрыто в 2026-05-04: пункт «Объединить `lots` ↔ `opendata_notices`» (FK + общий ingest-путь + UI-блок «Сырое извещение»).
+Закрыто в 2026-05-05: пункт «Server-side пагинация `/api/opendata-notices`» (ответ `{ items, total, limit, offset }` + UI-пагинация Notices).

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, update
 
 from app.api import router as api_router
+from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import IngestRun
 from app.schemas import HealthResponse
@@ -60,7 +61,7 @@ async def startup_event():
     db = SessionLocal()
     try:
         has_runs = db.scalar(select(IngestRun.id).limit(1))
-        if not has_runs:
+        if settings.run_ingest_on_startup and not has_runs:
             await scheduled_ingest()
     finally:
         db.close()

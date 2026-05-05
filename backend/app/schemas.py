@@ -18,6 +18,16 @@ class LotListItem(BaseModel):
     cadastral_number: str | None = None
     area_sqm: float | None = None
     is_izhs_candidate: bool = False
+    # From notice: start_price / area; not market valuation. None if price or area missing.
+    start_price_per_sotka: float | None = None
+    start_price_per_sqm: float | None = None
+
+
+class LotListPage(BaseModel):
+    items: list[LotListItem]
+    total: int
+    limit: int
+    offset: int
 
 
 class LotDetail(LotListItem):
@@ -64,6 +74,13 @@ class OpenDataNoticeListItem(BaseModel):
     publish_date: datetime | None
     bidd_type_code: str | None
     href: str
+
+
+class OpenDataNoticeListPage(BaseModel):
+    items: list[OpenDataNoticeListItem]
+    total: int
+    limit: int
+    offset: int
 
 
 class LotFacets(BaseModel):

@@ -1,5 +1,10 @@
+import csv
+from io import StringIO
+from typing import Any, Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, desc, select
+from fastapi.responses import Response
+from sqlalchemy import and_, case, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,13 +14,16 @@ from app.schemas import (
     LotDetail,
     LotFacets,
     LotListItem,
+    LotListPage,
     MapPoint,
     OpenDataNoticeFacets,
     OpenDataNoticeListItem,
+    OpenDataNoticeListPage,
 )
-from typing import Any
 
 router = APIRouter(prefix="/api")
+
+LotsSort = Literal["updated_at_desc", "price_per_sotka_asc", "price_per_sotka_desc"]
 
 
 def _normalize_str_list(values: list[str] | None) -> list[str] | None:
@@ -25,20 +33,47 @@ def _normalize_str_list(values: list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
-@router.get("/lots", response_model=list[LotListItem])
-def list_lots(
-    region: str | None = None,
-    status: str | None = None,
-    category: list[str] | None = Query(default=None),
-    is_izhs: bool | None = None,
-    min_area: float | None = None,
-    max_area: float | None = None,
-    max_start_price: float | None = None,
-    cadastral_number: str | None = None,
-    limit: int = Query(default=100, le=1000),
-    db: Session = Depends(get_db),
-):
-    filters = []
+def _derived_prices(start_price: float | None, area_sqm: float | None) -> tuple[float | None, float | None]:
+    """Rub per sotka (100 m²) and per m² from notice start_price and area; not market valuation."""
+    if start_price is None or area_sqm is None or area_sqm <= 0:
+        return None, None
+    per_sqm = start_price / area_sqm
+    per_sotka = start_price / (area_sqm / 100.0)
+    return (round(per_sotka, 2), round(per_sqm, 2))
+
+
+def _lot_list_item(lot: Lot) -> LotListItem:
+    ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
+    return LotListItem(
+        id=lot.id,
+        source_id=lot.source_id,
+        title=lot.title,
+        status=lot.status,
+        region=lot.region,
+        category=lot.category,
+        start_price=lot.start_price,
+        current_price=lot.current_price,
+        start_date=lot.start_date,
+        end_date=lot.end_date,
+        cadastral_number=lot.cadastral_number,
+        area_sqm=lot.area_sqm,
+        is_izhs_candidate=bool(lot.is_izhs_candidate),
+        start_price_per_sotka=ps,
+        start_price_per_sqm=pm,
+    )
+
+
+def _lot_filters(
+    region: str | None,
+    status: str | None,
+    category: list[str] | None,
+    is_izhs: bool | None,
+    min_area: float | None,
+    max_area: float | None,
+    max_start_price: float | None,
+    cadastral_number: str | None,
+) -> list:
+    filters: list = []
     if region:
         filters.append(Lot.region == region)
     if status:
@@ -56,12 +91,136 @@ def list_lots(
         filters.append(Lot.start_price <= max_start_price)
     if cadastral_number:
         filters.append(Lot.cadastral_number.ilike(f"%{cadastral_number}%"))
+    return filters
 
-    stmt = select(Lot).order_by(desc(Lot.updated_at)).limit(limit)
+
+def _lots_count(db: Session, filters: list) -> int:
+    q = select(func.count(Lot.id))
+    if filters:
+        q = q.where(and_(*filters))
+    return int(db.scalar(q) or 0)
+
+
+def _lots_select_ordered(sort: LotsSort):
+    price_per_sotka_expr = case(
+        (
+            and_(Lot.area_sqm.is_not(None), Lot.area_sqm > 0, Lot.start_price.is_not(None)),
+            Lot.start_price / (Lot.area_sqm / 100.0),
+        ),
+        else_=None,
+    )
+    stmt = select(Lot)
+    if sort == "price_per_sotka_asc":
+        stmt = stmt.order_by(price_per_sotka_expr.asc().nulls_last(), desc(Lot.updated_at))
+    elif sort == "price_per_sotka_desc":
+        stmt = stmt.order_by(price_per_sotka_expr.desc().nulls_last(), desc(Lot.updated_at))
+    else:
+        stmt = stmt.order_by(desc(Lot.updated_at))
+    return stmt
+
+
+@router.get("/lots", response_model=LotListPage)
+def list_lots(
+    region: str | None = None,
+    status: str | None = None,
+    category: list[str] | None = Query(default=None),
+    is_izhs: bool | None = None,
+    min_area: float | None = None,
+    max_area: float | None = None,
+    max_start_price: float | None = None,
+    cadastral_number: str | None = None,
+    sort: LotsSort = "updated_at_desc",
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    filters = _lot_filters(region, status, category, is_izhs, min_area, max_area, max_start_price, cadastral_number)
+    total = _lots_count(db, filters)
+    stmt = _lots_select_ordered(sort)
     if filters:
         stmt = stmt.where(and_(*filters))
+    stmt = stmt.offset(offset).limit(limit)
     rows = db.scalars(stmt).all()
-    return [LotListItem.model_validate(row, from_attributes=True) for row in rows]
+    return LotListPage(
+        items=[_lot_list_item(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/export/lots.csv")
+def export_lots_csv(
+    region: str | None = None,
+    status: str | None = None,
+    category: list[str] | None = Query(default=None),
+    is_izhs: bool | None = None,
+    min_area: float | None = None,
+    max_area: float | None = None,
+    max_start_price: float | None = None,
+    cadastral_number: str | None = None,
+    sort: LotsSort = "updated_at_desc",
+    max_rows: int = Query(default=10_000, ge=1, le=50_000),
+    db: Session = Depends(get_db),
+):
+    filters = _lot_filters(region, status, category, is_izhs, min_area, max_area, max_start_price, cadastral_number)
+    stmt = _lots_select_ordered(sort)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    stmt = stmt.limit(max_rows)
+    rows = db.scalars(stmt).all()
+
+    buf = StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(
+        [
+            "id",
+            "source_id",
+            "title",
+            "status",
+            "region",
+            "category",
+            "start_price",
+            "current_price",
+            "area_sqm",
+            "start_price_per_sotka",
+            "start_price_per_sqm",
+            "cadastral_number",
+            "is_izhs_candidate",
+            "start_date",
+            "end_date",
+            "source_url",
+        ]
+    )
+    for lot in rows:
+        ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
+        writer.writerow(
+            [
+                lot.id,
+                lot.source_id,
+                lot.title,
+                lot.status or "",
+                lot.region or "",
+                lot.category or "",
+                lot.start_price if lot.start_price is not None else "",
+                lot.current_price if lot.current_price is not None else "",
+                lot.area_sqm if lot.area_sqm is not None else "",
+                ps if ps is not None else "",
+                pm if pm is not None else "",
+                lot.cadastral_number or "",
+                "1" if lot.is_izhs_candidate else "0",
+                lot.start_date.isoformat() if lot.start_date else "",
+                lot.end_date.isoformat() if lot.end_date else "",
+                lot.source_url or "",
+            ]
+        )
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="lots_export.csv"'},
+    )
 
 
 @router.get("/lots/facets", response_model=LotFacets)
@@ -100,6 +259,7 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         if notice is not None and isinstance(notice.payload, dict):
             notice_payload = notice.payload
 
+    ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
     return LotDetail(
         id=lot.id,
         source_id=lot.source_id,
@@ -119,6 +279,8 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         cadastral_number=lot.cadastral_number,
         area_sqm=lot.area_sqm,
         is_izhs_candidate=bool(lot.is_izhs_candidate),
+        start_price_per_sotka=ps,
+        start_price_per_sqm=pm,
         land_category=lot.land_category,
         permitted_use=lot.permitted_use,
         address=lot.address,
@@ -146,7 +308,7 @@ def map_points(db: Session = Depends(get_db)):
 
 
 @router.get("/ingest-runs", response_model=list[IngestRunView])
-def get_ingest_runs(limit: int = Query(default=20, le=200), db: Session = Depends(get_db)):
+def get_ingest_runs(limit: int = Query(default=20, ge=1, le=200), db: Session = Depends(get_db)):
     rows = db.scalars(select(IngestRun).order_by(desc(IngestRun.started_at)).limit(limit)).all()
     return [IngestRunView.model_validate(row, from_attributes=True) for row in rows]
 
@@ -169,12 +331,13 @@ def opendata_notice_facets(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/opendata-notices", response_model=list[OpenDataNoticeListItem])
+@router.get("/opendata-notices", response_model=OpenDataNoticeListPage)
 def list_opendata_notices(
     document_type: list[str] | None = Query(default=None),
     bidd_type_code: list[str] | None = Query(default=None),
     reg_num: str | None = None,
-    limit: int = Query(default=200, le=1000),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     filters = []
@@ -187,9 +350,19 @@ def list_opendata_notices(
     if reg_num:
         filters.append(OpenDataNotice.reg_num == reg_num)
 
-    stmt = select(OpenDataNotice).order_by(desc(OpenDataNotice.publish_date)).limit(limit)
+    total_stmt = select(func.count(OpenDataNotice.id))
+    if filters:
+        total_stmt = total_stmt.where(and_(*filters))
+    total = int(db.scalar(total_stmt) or 0)
+
+    stmt = select(OpenDataNotice).order_by(desc(OpenDataNotice.publish_date)).offset(offset).limit(limit)
     if filters:
         stmt = stmt.where(and_(*filters))
 
     rows = db.scalars(stmt).all()
-    return [OpenDataNoticeListItem.model_validate(row, from_attributes=True) for row in rows]
+    return OpenDataNoticeListPage(
+        items=[OpenDataNoticeListItem.model_validate(row, from_attributes=True) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )

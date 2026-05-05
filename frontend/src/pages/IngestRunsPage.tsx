@@ -19,6 +19,24 @@ function durationMs(started: string | null, finished: string | null): string {
   return `${min.toFixed(1)} мин`;
 }
 
+function friendlyError(status: string, message: string | null): { text: string; title?: string } {
+  if (!message) return { text: "—" };
+  const m = message.trim();
+  if (status === "partial_failed" && m.toLowerCase().startsWith("files processed=")) {
+    return {
+      text: "Источник временно не отдал часть файлов (срез еще не опубликован/недоступен). Попробуйте позже.",
+      title: m,
+    };
+  }
+  if (status === "failed" && m.toLowerCase().includes("torgi opendata:")) {
+    return {
+      text: "Источник Torgi вернул ошибку по данным (файл недоступен или еще не опубликован). Попробуйте позже.",
+      title: m,
+    };
+  }
+  return { text: m };
+}
+
 export function IngestRunsPage() {
   const [runs, setRuns] = useState<IngestRun[]>([]);
   const [error, setError] = useState("");
@@ -60,31 +78,38 @@ export function IngestRunsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>#</th>
+              <th className="cell--num">#</th>
               <th>Статус</th>
-              <th>Старт</th>
-              <th>Финиш</th>
-              <th>Длительность</th>
-              <th>Получено</th>
-              <th>Сохранено</th>
-              <th>Изменено</th>
-              <th>Ошибка</th>
+              <th className="cell--nowrap">Старт</th>
+              <th className="cell--nowrap">Финиш</th>
+              <th className="cell--num">Длительность</th>
+              <th className="cell--num">Получено</th>
+              <th className="cell--num">Сохранено</th>
+              <th className="cell--num">Изменено</th>
+              <th className="ingest-runs__error-col">Ошибка</th>
             </tr>
           </thead>
           <tbody>
-            {runs.map((run) => (
-              <tr key={run.id}>
-                <td>{run.id}</td>
-                <td><StatusBadge status={run.status} variant="ingest" /></td>
-                <td>{formatDate(run.started_at)}</td>
-                <td>{formatDate(run.finished_at)}</td>
-                <td>{durationMs(run.started_at, run.finished_at)}</td>
-                <td>{run.fetched_count}</td>
-                <td>{run.upserted_count}</td>
-                <td>{run.changed_count}</td>
-                <td className="cell--error">{run.error_message || "—"}</td>
-              </tr>
-            ))}
+            {runs.map((run) => {
+              const err = friendlyError(run.status, run.error_message);
+              return (
+                <tr key={run.id}>
+                  <td className="cell--num">{run.id}</td>
+                  <td>
+                    <StatusBadge status={run.status} variant="ingest" />
+                  </td>
+                  <td className="cell--nowrap">{formatDate(run.started_at)}</td>
+                  <td className="cell--nowrap">{formatDate(run.finished_at)}</td>
+                  <td className="cell--num">{durationMs(run.started_at, run.finished_at)}</td>
+                  <td className="cell--num">{run.fetched_count}</td>
+                  <td className="cell--num">{run.upserted_count}</td>
+                  <td className="cell--num">{run.changed_count}</td>
+                  <td className="cell--error ingest-runs__error-col" title={err.title ?? undefined}>
+                    {err.text}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

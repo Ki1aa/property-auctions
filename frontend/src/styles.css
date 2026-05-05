@@ -136,6 +136,12 @@ a:hover {
   flex-wrap: wrap;
 }
 
+.page__heading h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex: 1 1 320px;
+}
+
 .page__subtitle {
   margin: -8px 0 0;
   color: var(--text-muted);
@@ -452,10 +458,35 @@ tr:hover td {
 .cell--error {
   color: var(--error);
   font-size: 13px;
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+
+.cell--nowrap {
   white-space: nowrap;
+}
+
+.cell--num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cell--name {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.cell--name .badge {
+  display: inline-block;
+  margin-top: 2px;
+  margin-left: 8px;
+}
+
+.ingest-runs__error-col {
+  width: 360px;
+  max-width: min(360px, 45vw);
 }
 
 .cell--mono {
@@ -613,6 +644,14 @@ tr:hover td {
 .card__label {
   color: var(--text-muted);
   font-weight: 500;
+  flex: 0 0 auto;
+}
+
+.card__row > span:last-child {
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* Misc */
@@ -639,6 +678,14 @@ tr:hover td {
   font-size: 14px;
   font-weight: 500;
   display: inline-block;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 16px;
 }
 
 @media (max-width: 720px) {

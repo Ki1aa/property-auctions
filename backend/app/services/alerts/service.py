@@ -9,6 +9,9 @@ from app.services.alerts.telegram import send_telegram_message
 
 
 async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str) -> None:
+    if settings.telegram_alert_only_izhs and not lot.is_izhs_candidate:
+        return
+
     event_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     exists = db.scalar(
         select(AlertEvent).where(
