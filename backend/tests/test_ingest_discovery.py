@@ -52,7 +52,9 @@ def test_discovery_uses_registry_primary(monkeypatch):
 
     plan = asyncio.run(build_discovery_plan(mode="operational", last_processed_to=None))
     assert plan.source_kind == "registry"
-    assert any(item.source_url == dataset_url for item in plan.files)
+    assert len(plan.files) >= 1
+    assert all("7710568760-notice" in item.source_url for item in plan.files)
+    assert all("data-" in item.source_url for item in plan.files)
 
 
 def test_discovery_falls_back_to_card(monkeypatch):
@@ -77,7 +79,8 @@ def test_discovery_falls_back_to_card(monkeypatch):
 
     plan = asyncio.run(build_discovery_plan(mode="operational", last_processed_to=None))
     assert plan.source_kind == "card"
-    assert any(item.source_url == dataset_url for item in plan.files)
+    assert len(plan.files) >= 1
+    assert all("data-" in item.source_url for item in plan.files)
 
 
 def test_discovery_supports_direct_override(monkeypatch):
@@ -87,8 +90,9 @@ def test_discovery_supports_direct_override(monkeypatch):
 
     plan = asyncio.run(build_discovery_plan(mode="operational", last_processed_to=None))
     assert plan.source_kind == "direct"
-    assert plan.files[0].source_url == direct_url
     assert plan.files[0].structure_url == "https://example.com/structure-20240401.json"
+    assert "example.com" in plan.files[0].source_url
+    assert "data-" in plan.files[0].source_url
 
 
 def test_discovery_operational_plans_catchup_with_watermark(monkeypatch):

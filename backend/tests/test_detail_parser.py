@@ -43,6 +43,57 @@ SAMPLE_NON_IZHS = {
 }
 
 
+# Observed on torgi.gov.ru: project / inventory area codes and totalAreaRealty.
+REAL_AREA_CODES_NOTICE = {
+    "exportObject": {
+        "structuredObject": {
+            "notice": {
+                "lots": [
+                    {
+                        "lotName": "земельный участок",
+                        "biddingObjectInfo": {
+                            "category": {"name": "Земли населенных пунктов"},
+                            "characteristics": [
+                                {
+                                    "code": "SquareZU_project",
+                                    "name": "Площадь по проекту",
+                                    "characteristicValue": 1871,
+                                    "OKEI": {"code": "055", "name": "Квадратный метр"},
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        }
+    }
+}
+
+REAL_TOTAL_AREA_REALTY_NOTICE = {
+    "exportObject": {
+        "structuredObject": {
+            "notice": {
+                "lots": [
+                    {
+                        "lotName": "земельный участок",
+                        "biddingObjectInfo": {
+                            "category": {"name": "Земли населенных пунктов"},
+                            "characteristics": [
+                                {
+                                    "code": "totalAreaRealty",
+                                    "name": "Площадь",
+                                    "characteristicValue": 999.5,
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+        }
+    }
+}
+
+
 REAL_SCHEMA_NOTICE = {
     "exportObject": {
         "structuredObject": {
@@ -106,6 +157,17 @@ def test_parse_notice_detail_returns_none_when_missing():
     assert result["land_category"] is None
     assert result["permitted_use"] is None
     assert result["address"] is None
+
+
+def test_parse_notice_detail_reads_area_from_squarezu_project_characteristic():
+    result = parse_notice_detail(REAL_AREA_CODES_NOTICE)
+    assert result["area_sqm"] == 1871.0
+    assert "земельн" in (result["lot_name"] or "").lower()
+
+
+def test_parse_notice_detail_reads_area_from_total_area_realty_characteristic():
+    result = parse_notice_detail(REAL_TOTAL_AREA_REALTY_NOTICE)
+    assert result["area_sqm"] == 999.5
 
 
 def test_parse_notice_detail_supports_real_schema_characteristics():
@@ -185,6 +247,34 @@ def test_parse_notice_detail_cadastral_with_internal_spaces_normalized():
     payload = {"description": "Участок с кадастровым номером 72 : 23 : 0301002 : 42"}
     result = parse_notice_detail(payload)
     assert result["cadastral_number"] == "72:23:0301002:42"
+
+
+def test_parse_notice_detail_prefers_price_min_over_price_min_vat():
+    payload = {"lots": [{"priceMin": "100", "priceMinVAT": "120"}]}
+    assert parse_notice_detail(payload)["start_price"] == 100.0
+
+
+def test_parse_notice_detail_falls_back_to_price_min_vat():
+    payload = {"lots": [{"priceMinVAT": "550000.5"}]}
+    assert parse_notice_detail(payload)["start_price"] == 550000.5
+
+
+def test_parse_notice_detail_start_price_from_start_price_characteristic():
+    payload = {
+        "lots": [
+            {
+                "biddingObjectInfo": {
+                    "characteristics": [
+                        {
+                            "code": "StartPrice",
+                            "characteristicValue": "1500000",
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    assert parse_notice_detail(payload)["start_price"] == 1500000.0
 
 
 def test_parse_notice_detail_picks_cadastral_via_characteristic_only():

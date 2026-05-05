@@ -55,7 +55,7 @@
 backend/
   app/
     main.py            # FastAPI app, CORS, startup-хуки, авто-create_all
-    api.py             # все REST-эндпоинты (/api/lots, /api/lots/{id}, /api/lots-map, /api/ingest-runs, /api/opendata-notices)
+    api.py             # все REST-эндпоинты (/api/lots, /api/lots/facets, /api/lots/{id}, /api/lots-map, /api/ingest-runs, /api/opendata-notices, /api/opendata-notices/facets)
     models.py          # SQLAlchemy: Organizer, Lot, LotSnapshot, IngestRun, IngestManifest, AlertEvent, OpenDataNotice
     schemas.py         # Pydantic-схемы ответов API
     config.py          # Settings (pydantic-settings, читает корневой .env)
@@ -82,6 +82,7 @@ backend/
     run_backfill_ingest.py          # backfill за интервал дат
     reprocess_lots_offline.py       # офлайн-репроцессинг существующих Lot: пересчёт is_izhs_candidate + добор кадастра из LotSnapshot.payload
     link_lots_to_notices.py         # backfill Lot.opendata_notice_id по существующим парам href/reg_num
+    repair_poisoned_ingest_manifests.py  # ingest_manifest: processed+0 при error-envelope или при несоответствии (живой URL непустой, в БД 0 записей)
     dev_sync_schema.py              # dev-only: ALTER TABLE для существующей SQLite под новые поля моделей
   tests/                            # pytest (api, ingest client/discovery/service/upsert, normalizer, detail_parser, retry, notice-link)
   requirements.txt
@@ -92,13 +93,15 @@ frontend/
   src/
     main.tsx           # точка входа, BrowserRouter
     App.tsx            # <Routes>: /, /notices, /lots, /lots/:id, /map, /ingest
-    api.ts             # fetch-обёртки: fetchNotices, fetchLots, fetchLot, fetchMapPoints, fetchIngestRuns
+    api.ts             # fetch-обёртки: fetchNotices, fetchOpenDataNoticeFacets, fetchLots, fetchLotFacets, fetchLot, fetchMapPoints, fetchIngestRuns
     types.ts           # Notice, Lot, LotDetail, MapPoint, IngestRun
+    facetFilterUi.ts   # порог числа значений фасетов для одиночного `<select>` vs свободный ввод
     styles.css         # CSS-переменные + классы layout/table/badge/card
     vite-env.d.ts
     components/
       Layout.tsx        # шапка + nav + <Outlet/>
       StatusBadge.tsx   # цветной бейдж статуса
+      FacetMultiPicker.tsx  # мультивыбор фасетов: кнопка, панель с чекбоксами, Применить
       LotsTable.tsx
       TradesTable.tsx
       TradesMap.tsx     # MapLibre, авто-fitBounds для нескольких точек, flyTo для одной
@@ -187,7 +190,8 @@ flowchart LR
 - Идемпотентность: `IngestManifest(source_url, sha256)` уникальна, повторно тот же файл не обрабатывается ([backend/app/services/ingest/service.py](backend/app/services/ingest/service.py) - `_is_manifest_processed`).
 - Watermark: в `operational` режиме старт = `max(IngestManifest.data_to)` для провайдера/датасета.
 - Schema versioning: только `SUPPORTED_STRUCTURE_VERSIONS` (по умолчанию `20240401`) обрабатываются; остальные сохраняются в raw и помечаются `schema_migration_required`.
-- На стартe backend, если `ingest_runs` пуст, автоматически запускается ingest (`@app.on_event("startup")` в [backend/app/main.py](backend/app/main.py)). В продакшене это надо будет отключить.
+- Операционный ingest: план файлов — только окно watermark от последнего `data_to` (без полного слияния с историческим списком из реестра), иначе сортировка начиналась бы с самых старых срезов.
+- На стартe backend, если `ingest_runs` пуст, автоматически запускается ingest (`@app.on_event("startup")` в [backend/app/main.py](backend/app/main.py)). В продакшене это надо будет отключить. Долго висящие `IngestRun` в `running` закрываются при старте как прерванные.
 
 ---
 
@@ -242,6 +246,13 @@ cd backend
 python scripts/run_backfill_ingest.py --from-date 2026-04-01 --to-date 2026-04-10
 ```
 
+**Починка ingest_manifest после ошибочного «processed» на теле `{"error":...}` от Торгов:**
+
+```powershell
+cd backend
+python scripts/repair_poisoned_ingest_manifests.py
+```
+
 ---
 
 ## 6. Соглашения для агентов
@@ -286,11 +297,11 @@ python scripts/run_backfill_ingest.py --from-date 2026-04-01 --to-date 2026-04-1
 - **Retry detail-fetch**: один retry с backoff 1.5s в `_fetch_detail_with_retry` ([backend/app/services/ingest/service.py](backend/app/services/ingest/service.py)).
 - **ИЖС-детектор** через keyword match (`IZHS_KEYWORDS`).
 - **Связь Lot ↔ OpenDataNotice**: FK `Lot.opendata_notice_id`, ingest пишет обе таблицы атомарно, `/api/lots/{id}` возвращает `notice_payload` (raw opendata-извещение) - [backend/app/models.py](backend/app/models.py), [backend/app/api.py](backend/app/api.py).
-- REST API: `/health`, `/api/lots` (+ фильтры `is_izhs/min_area/max_area/max_start_price/cadastral_number`), `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`), `/api/lots-map`, `/api/ingest-runs`, `/api/opendata-notices` - [backend/app/api.py](backend/app/api.py).
+- REST API: `/health`, `/api/lots` (+ фильтры; `category` повторяющимся query для OR по видам торгов), `/api/lots/facets` (distinct `category` / `status` / `region`), `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`), `/api/lots-map`, `/api/ingest-runs`, `/api/opendata-notices` (`document_type` / `bidd_type_code` — списки; `reg_num` — точное совпадение), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
 - Планировщик ingest (APScheduler, по умолчанию раз в сутки) - [backend/app/scheduler.py](backend/app/scheduler.py).
 - Telegram-уведомления (заглушка с дедупликацией через AlertEvent) - [backend/app/services/alerts/](backend/app/services/alerts).
-- Pytest: 37 тестов (API + notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser с 8 новыми кейсами на текстовые fallback'и).
-- SPA: страницы Dashboard / Notices / Lots (с фильтрами по площади/цене/кадастру + чекбокс ИЖС, deep-link через query) / LotDetail (блок «Кадастр и земля» + ссылка на ПКК Росреестра + collapsible-блок «Сырое извещение (opendata)») / Map / IngestRuns - [frontend/src/](frontend/src).
+- Pytest: 45 тестов (API + notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены).
+- SPA: страницы Dashboard / Notices (тип документа и вид торгов — всплывающий мультивыбор с чекбоксами и «Применить»; `reg_num` — только текст) / Lots (регион и тип документа — одиночный `<select>` при малом числе значений фасетов; вид торгов — тот же мультивыбор; площадь/цена/кадастр, ИЖС, deep-link с `category=`) / LotDetail / Map / IngestRuns - [frontend/src/](frontend/src).
 - TypeScript-проверка чистая, Vite production build проходит.
 
 **Не сделано / на паузе:**

@@ -284,6 +284,13 @@ def _plan_files_with_watermark(
     else:
         scheduled.append(latest)
 
+    if mode == "operational":
+        # Do not merge the full registry into operational runs: that would sort from the
+        # oldest monthly/daily slice and re-fetch history on every tick. Watermark work
+        # should stay within the planned date window built from the latest template URL.
+        planned = sorted({item.source_url: item for item in scheduled}.values(), key=_dataset_sort_key)
+        return planned if planned else [latest]
+
     by_url: dict[str, DiscoveredDatasetFile] = {item.source_url: item for item in scheduled}
     by_url.update({item.source_url: item for item in available})
     return sorted(by_url.values(), key=_dataset_sort_key)

@@ -1,12 +1,19 @@
-import { IngestRun, Lot, LotDetail, MapPoint, Notice } from "./types";
+import { IngestRun, Lot, LotDetail, LotFacets, MapPoint, Notice, OpenDataNoticeFacets } from "./types";
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000") as string;
 
-async function request<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+type RequestParam = string | number | boolean | undefined;
+
+async function request<T>(path: string, params?: Record<string, RequestParam | RequestParam[]>): Promise<T> {
   const query = new URLSearchParams();
   if (params) {
     for (const [key, value] of Object.entries(params)) {
-      if (value !== undefined && value !== "") {
+      if (value === undefined || value === "") continue;
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (item !== undefined && item !== "") query.append(key, String(item));
+        }
+      } else {
         query.set(key, String(value));
       }
     }
@@ -22,8 +29,8 @@ async function request<T>(path: string, params?: Record<string, string | number 
 }
 
 export function fetchNotices(params: {
-  documentType?: string;
-  biddTypeCode?: string;
+  documentType?: string[];
+  biddTypeCode?: string[];
   regNum?: string;
   limit?: number;
 }): Promise<Notice[]> {
@@ -35,10 +42,14 @@ export function fetchNotices(params: {
   });
 }
 
+export function fetchOpenDataNoticeFacets(): Promise<OpenDataNoticeFacets> {
+  return request<OpenDataNoticeFacets>("/api/opendata-notices/facets");
+}
+
 export function fetchLots(params: {
   region?: string;
   status?: string;
-  category?: string;
+  category?: string[];
   isIzhs?: boolean;
   minArea?: number;
   maxArea?: number;
@@ -57,6 +68,10 @@ export function fetchLots(params: {
     cadastral_number: params.cadastralNumber,
     limit: params.limit,
   });
+}
+
+export function fetchLotFacets(): Promise<LotFacets> {
+  return request<LotFacets>("/api/lots/facets");
 }
 
 export function fetchLot(id: number | string): Promise<LotDetail> {

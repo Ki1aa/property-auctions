@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import IngestManifest, Lot, OpenDataNotice
+from app.models import IngestManifest, IngestRun, Lot, OpenDataNotice
 from app.services.ingest.discovery import DiscoveredDatasetFile, DiscoveryPlan
 from app.services.ingest.service import run_ingest
 
@@ -113,6 +113,38 @@ def test_run_ingest_marks_unknown_schema(monkeypatch):
     assert result["upserted_count"] == 0
     assert len(manifests) == 1
     assert manifests[0].status == "schema_migration_required"
+
+
+def test_run_ingest_rejects_torgi_error_envelope(monkeypatch):
+    db = _db_session()
+    file_ref = DiscoveredDatasetFile(
+        source_url="https://example.com/data-20260504T0000-20260505T0000-structure-20240401.json",
+        structure_url="https://example.com/structure-20240401.json",
+        data_from=datetime(2026, 5, 4, tzinfo=timezone.utc),
+        data_to=datetime(2026, 5, 5, tzinfo=timezone.utc),
+        schema_version="20240401",
+        source_kind="registry",
+    )
+
+    async def fake_discovery_plan(*, mode: str, last_processed_to):
+        return DiscoveryPlan(files=[file_ref], source_kind="registry", dataset_id="7710568760-notice")
+
+    async def fake_fetch_with_meta(url: str):
+        return {"error": "Slice not published yet"}, "e" * 64
+
+    monkeypatch.setattr("app.services.ingest.service.build_discovery_plan", fake_discovery_plan)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload_with_meta", fake_fetch_with_meta)
+
+    result = asyncio.run(run_ingest(db))
+    manifests = db.scalars(select(IngestManifest)).all()
+    runs = db.scalars(select(IngestRun)).all()
+
+    assert result["upserted_count"] == 0
+    assert len(manifests) == 1
+    assert manifests[0].status == "failed"
+    assert manifests[0].error is not None
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
 
 
 def test_run_ingest_applies_region_filter_and_detail_enrichment(monkeypatch):

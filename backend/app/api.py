@@ -4,17 +4,32 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import IngestRun, Lot, OpenDataNotice, Organizer
-from app.schemas import IngestRunView, LotDetail, LotListItem, MapPoint, OpenDataNoticeListItem
+from app.schemas import (
+    IngestRunView,
+    LotDetail,
+    LotFacets,
+    LotListItem,
+    MapPoint,
+    OpenDataNoticeFacets,
+    OpenDataNoticeListItem,
+)
 from typing import Any
 
 router = APIRouter(prefix="/api")
+
+
+def _normalize_str_list(values: list[str] | None) -> list[str] | None:
+    if not values:
+        return None
+    cleaned = [v.strip() for v in values if v and v.strip()]
+    return cleaned or None
 
 
 @router.get("/lots", response_model=list[LotListItem])
 def list_lots(
     region: str | None = None,
     status: str | None = None,
-    category: str | None = None,
+    category: list[str] | None = Query(default=None),
     is_izhs: bool | None = None,
     min_area: float | None = None,
     max_area: float | None = None,
@@ -28,8 +43,9 @@ def list_lots(
         filters.append(Lot.region == region)
     if status:
         filters.append(Lot.status == status)
-    if category:
-        filters.append(Lot.category == category)
+    categories = _normalize_str_list(category)
+    if categories:
+        filters.append(Lot.category.in_(categories))
     if is_izhs is not None:
         filters.append(Lot.is_izhs_candidate.is_(is_izhs))
     if min_area is not None:
@@ -46,6 +62,25 @@ def list_lots(
         stmt = stmt.where(and_(*filters))
     rows = db.scalars(stmt).all()
     return [LotListItem.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/lots/facets", response_model=LotFacets)
+def lot_facets(db: Session = Depends(get_db)):
+    def distinct_strings(column):
+        rows = db.scalars(
+            select(column)
+            .where(column.is_not(None))
+            .where(column != "")
+            .distinct()
+            .order_by(column)
+        ).all()
+        return [r for r in rows if r]
+
+    return LotFacets(
+        category=distinct_strings(Lot.category),
+        status=distinct_strings(Lot.status),
+        region=distinct_strings(Lot.region),
+    )
 
 
 @router.get("/lots/{lot_id}", response_model=LotDetail)
@@ -116,19 +151,39 @@ def get_ingest_runs(limit: int = Query(default=20, le=200), db: Session = Depend
     return [IngestRunView.model_validate(row, from_attributes=True) for row in rows]
 
 
+@router.get("/opendata-notices/facets", response_model=OpenDataNoticeFacets)
+def opendata_notice_facets(db: Session = Depends(get_db)):
+    def distinct_strings(column):
+        rows = db.scalars(
+            select(column)
+            .where(column.is_not(None))
+            .where(column != "")
+            .distinct()
+            .order_by(column)
+        ).all()
+        return [r for r in rows if r]
+
+    return OpenDataNoticeFacets(
+        bidd_type_code=distinct_strings(OpenDataNotice.bidd_type_code),
+        document_type=distinct_strings(OpenDataNotice.document_type),
+    )
+
+
 @router.get("/opendata-notices", response_model=list[OpenDataNoticeListItem])
 def list_opendata_notices(
-    document_type: str | None = None,
-    bidd_type_code: str | None = None,
+    document_type: list[str] | None = Query(default=None),
+    bidd_type_code: list[str] | None = Query(default=None),
     reg_num: str | None = None,
     limit: int = Query(default=200, le=1000),
     db: Session = Depends(get_db),
 ):
     filters = []
-    if document_type:
-        filters.append(OpenDataNotice.document_type == document_type)
-    if bidd_type_code:
-        filters.append(OpenDataNotice.bidd_type_code == bidd_type_code)
+    doc_types = _normalize_str_list(document_type)
+    if doc_types:
+        filters.append(OpenDataNotice.document_type.in_(doc_types))
+    bidd_types = _normalize_str_list(bidd_type_code)
+    if bidd_types:
+        filters.append(OpenDataNotice.bidd_type_code.in_(bidd_types))
     if reg_num:
         filters.append(OpenDataNotice.reg_num == reg_num)
 

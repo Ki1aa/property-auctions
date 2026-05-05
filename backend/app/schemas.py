@@ -64,3 +64,14 @@ class OpenDataNoticeListItem(BaseModel):
     publish_date: datetime | None
     bidd_type_code: str | None
     href: str
+
+
+class LotFacets(BaseModel):
+    category: list[str]
+    status: list[str]
+    region: list[str]
+
+
+class OpenDataNoticeFacets(BaseModel):
+    bidd_type_code: list[str]
+    document_type: list[str]

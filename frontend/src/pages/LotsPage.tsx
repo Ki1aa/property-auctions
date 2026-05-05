@@ -1,23 +1,45 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { fetchLots } from "../api";
+import { fetchLotFacets, fetchLots } from "../api";
+import { FacetMultiPicker } from "../components/FacetMultiPicker";
 import { LotsTable } from "../components/LotsTable";
-import { Lot } from "../types";
+import { FACET_SINGLE_SELECT_MAX } from "../facetFilterUi";
+import { Lot, LotFacets } from "../types";
 
 export function LotsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [lots, setLots] = useState<Lot[]>([]);
   const [region, setRegion] = useState(searchParams.get("region") ?? "");
   const [status, setStatus] = useState(searchParams.get("status") ?? "");
-  const [category, setCategory] = useState(searchParams.get("category") ?? "");
+  const [categories, setCategories] = useState<string[]>(() => searchParams.getAll("category"));
   const [isIzhs, setIsIzhs] = useState(searchParams.get("is_izhs") === "true");
   const [minArea, setMinArea] = useState(searchParams.get("min_area") ?? "");
   const [maxArea, setMaxArea] = useState(searchParams.get("max_area") ?? "");
   const [maxStartPrice, setMaxStartPrice] = useState(searchParams.get("max_start_price") ?? "");
   const [cadastral, setCadastral] = useState(searchParams.get("cadastral_number") ?? "");
+  const [facets, setFacets] = useState<LotFacets | null>(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
+  const regionOptions = useMemo(() => {
+    const s = new Set([...(facets?.region ?? []), ...(region ? [region] : [])]);
+    return Array.from(s).sort();
+  }, [facets, region]);
+
+  const statusOptions = useMemo(() => {
+    const s = new Set([...(facets?.status ?? []), ...(status ? [status] : [])]);
+    return Array.from(s).sort();
+  }, [facets, status]);
+
+  const categoryOptions = useMemo(() => {
+    const s = new Set([...(facets?.category ?? []), ...categories]);
+    return Array.from(s).sort();
+  }, [facets, categories]);
+
+  const regionAsSelect =
+    Boolean(facets) && regionOptions.length > 0 && regionOptions.length <= FACET_SINGLE_SELECT_MAX;
+  const statusAsSelect =
+    Boolean(facets) && statusOptions.length > 0 && statusOptions.length <= FACET_SINGLE_SELECT_MAX;
   async function load() {
     try {
       setError("");
@@ -25,7 +47,7 @@ export function LotsPage() {
       const data = await fetchLots({
         region: region || undefined,
         status: status || undefined,
-        category: category || undefined,
+        category: categories.length ? categories : undefined,
         isIzhs: isIzhs ? true : undefined,
         minArea: minArea ? Number(minArea) : undefined,
         maxArea: maxArea ? Number(maxArea) : undefined,
@@ -42,6 +64,12 @@ export function LotsPage() {
   }
 
   useEffect(() => {
+    void fetchLotFacets()
+      .then(setFacets)
+      .catch((e) => setError((e as Error).message));
+  }, []);
+
+  useEffect(() => {
     void load();
   }, []);
 
@@ -50,7 +78,9 @@ export function LotsPage() {
     const next = new URLSearchParams();
     if (region) next.set("region", region);
     if (status) next.set("status", status);
-    if (category) next.set("category", category);
+    for (const c of categories) {
+      next.append("category", c);
+    }
     if (isIzhs) next.set("is_izhs", "true");
     if (minArea) next.set("min_area", minArea);
     if (maxArea) next.set("max_area", maxArea);
@@ -63,7 +93,7 @@ export function LotsPage() {
   function handleReset() {
     setRegion("");
     setStatus("");
-    setCategory("");
+    setCategories([]);
     setIsIzhs(false);
     setMinArea("");
     setMaxArea("");
@@ -79,9 +109,52 @@ export function LotsPage() {
       <p className="page__subtitle">Найдено: {isLoading ? "…" : lots.length}</p>
 
       <form className="filters filters--grid" onSubmit={handleSubmit}>
-        <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="Регион (код, например 72)" />
-        <input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="Статус" />
-        <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Категория / вид торгов" />
+        {regionAsSelect ? (
+          <label className="filters__field">
+            <span className="filters__facet-label">Регион</span>
+            <select className="filters__select" value={region} onChange={(e) => setRegion(e.target.value)}>
+              <option value="">Все</option>
+              {regionOptions.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <input
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            placeholder="Регион (код, например 72)"
+          />
+        )}
+        {statusAsSelect ? (
+          <label className="filters__field">
+            <span className="filters__facet-label">Тип документа</span>
+            <select className="filters__select" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">Все</option>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <input
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            placeholder="Тип документа (код documentType)"
+          />
+        )}
+        {categoryOptions.length > 0 && (
+          <FacetMultiPicker
+            label="Вид торгов"
+            options={categoryOptions}
+            value={categories}
+            onChange={setCategories}
+          />
+        )}
         <input value={cadastral} onChange={(e) => setCadastral(e.target.value)} placeholder="Кадастровый номер (часть)" />
         <input
           value={minArea}

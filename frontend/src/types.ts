@@ -55,3 +55,14 @@ export type IngestRun = {
   changed_count: number;
   error_message: string | null;
 };
+
+export type LotFacets = {
+  category: string[];
+  status: string[];
+  region: string[];
+};
+
+export type OpenDataNoticeFacets = {
+  bidd_type_code: string[];
+  document_type: string[];
+};

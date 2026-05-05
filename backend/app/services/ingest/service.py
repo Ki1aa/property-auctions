@@ -38,6 +38,16 @@ def _pick_items(payload):
     return []
 
 
+def _is_torgi_opendata_error_envelope(payload: Any) -> bool:
+    """Torgi returns HTTP 200 with {\"error\": \"...\"} when a slice is not published yet."""
+    if not isinstance(payload, dict):
+        return False
+    err = payload.get("error")
+    if not isinstance(err, str) or not err.strip():
+        return False
+    return len(_pick_items(payload)) == 0
+
+
 def _supported_structure_versions() -> set[str]:
     values = [item.strip() for item in settings.supported_structure_versions.split(",")]
     return {item for item in values if item}
@@ -204,6 +214,8 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
         for file_ref in discovery_plan.files:
             try:
                 payload, payload_sha = await fetch_json_payload_with_meta(file_ref.source_url)
+                if _is_torgi_opendata_error_envelope(payload):
+                    raise RuntimeError(f"Torgi opendata: {payload.get('error')}")
                 if _is_manifest_processed(db, file_ref.source_url, payload_sha):
                     logger.info("Skipping already processed source URL: %s", file_ref.source_url)
                     continue
@@ -282,14 +294,18 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
             run.status = "success"
         elif processed_files > 0:
             run.status = "partial_failed"
-        else:
+        elif failed_files > 0:
             run.status = "failed"
+        else:
+            run.status = "noop"
         run.fetched_count = fetched_count
         run.upserted_count = upserted_count
         run.changed_count = changed_count
         run.finished_at = datetime.now(timezone.utc)
         if failed_files > 0:
             run.error_message = f"Files processed={processed_files}, failed={failed_files}"
+        elif run.status == "noop":
+            run.error_message = "No new files to process (already ingested)."
         db.commit()
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ingest failed")

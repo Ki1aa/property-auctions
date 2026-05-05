@@ -5,6 +5,7 @@ type Props = {
 
 const ingestVariantMap: Record<string, "success" | "warn" | "error"> = {
   success: "success",
+  noop: "warn",
   partial_failed: "warn",
   running: "warn",
   failed: "error",

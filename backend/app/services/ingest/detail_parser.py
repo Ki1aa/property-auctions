@@ -77,6 +77,12 @@ PRICE_ALIASES = (
     "priceMin",
 )
 
+# Used only when no field from PRICE_ALIASES is present (e.g. VAT-inclusive list price).
+PRICE_FALLBACK_ALIASES = (
+    "priceMinVAT",
+    "minPriceVAT",
+)
+
 # Free-text fields searched for area / vri keywords as last resort.
 DESCRIPTION_FIELD_ALIASES = (
     "lotDescription",
@@ -326,7 +332,18 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
     area_sqm = _find_first_number(payload, AREA_FIELD_ALIASES)
     if area_sqm is None:
         area_sqm = _find_characteristic_number(
-            payload, ("SquareZU", "EstateArea", "LotSquare", "Square", "estateArea", "area", "lotArea")
+            payload,
+            (
+                "SquareZU",
+                "SquareZU_project",
+                "totalAreaRealty",
+                "EstateArea",
+                "LotSquare",
+                "Square",
+                "estateArea",
+                "area",
+                "lotArea",
+            ),
         )
     if area_sqm is None:
         area_sqm = _find_area_in_text(payload)
@@ -339,6 +356,21 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
     if permitted_use is None:
         permitted_use = _find_permitted_use_in_text(payload)
 
+    start_price = _find_first_number(payload, PRICE_ALIASES)
+    if start_price is None:
+        start_price = _find_characteristic_number(
+            payload,
+            (
+                "StartPrice",
+                "InitialPrice",
+                "MinLotPrice",
+                "MinPrice",
+                "AuctionStartPrice",
+            ),
+        )
+    if start_price is None:
+        start_price = _find_first_number(payload, PRICE_FALLBACK_ALIASES)
+
     return {
         "cadastral_number": cadastral,
         "area_sqm": area_sqm,
@@ -346,7 +378,7 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
         "permitted_use": permitted_use,
         "address": _find_first_string(payload, ADDRESS_ALIASES),
         "lot_name": _find_first_string(payload, NAME_ALIASES),
-        "start_price": _find_first_number(payload, PRICE_ALIASES),
+        "start_price": start_price,
     }
 
 

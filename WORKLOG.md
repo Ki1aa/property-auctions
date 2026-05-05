@@ -6,6 +6,152 @@
 
 ---
 
+## 2026-05-05 - Чистка ingest_manifest, перезапуск API, ручной ingest, верификация detail_parser
+
+**Что сделано:**
+- Расширен [backend/scripts/repair_poisoned_ingest_manifests.py](backend/scripts/repair_poisoned_ingest_manifests.py): кроме error-envelope Торгов удаляются строки `processed` с `records_count=0`, если по URL сейчас отдаётся непустой `listObjects` (несогласованность манифеста с живым ответом).
+- Перезапуск uvicorn без `--reload`: при старте закрыто **3** зависших `IngestRun` в `running` (в т.ч. бывший id=15 с сообщением «Interrupted before completion»).
+- Запуск repair: удалены **4** манифеста (id 2, 5, 6, 7): живые размеры срезов 1324 / 19 / 26 / 22 объектов.
+- Ручной прогон `scheduled_ingest()`: запись **id=16**, статус `partial_failed` (обработано **3** файла, **1** срез `data-20260504…20260505` упал на error-envelope Торгов «файл не подготовлен»), метрики **67 / 67 / 67** (получено / сохранено / изменено под фильтром региона и лимитом detail).
+- Лотов в БД: **4114 -> 4171**.
+- `verify_detail_parser_window.py --days 5 --limit-per-day 80`: режим live, **213** detail успешно; сумма покрытий полей и сегмент `is_land_plot=true` (n=114): см. вывод ниже; артефакт [data/raw/detail_parser_window_verification.json](data/raw/detail_parser_window_verification.json).
+
+**Сводка verify (поля, сумма по окну):** cadastral_number 136, area_sqm 165, land_category 213, permitted_use 119, address 211, lot_name 213, start_price 141.
+
+**Сегмент is_land_plot=true (n=114):** cadastral 81, area_sqm 114, permitted_use 113, start_price 42.
+
+**Затронутые файлы:**
+- backend/scripts/repair_poisoned_ingest_manifests.py
+- WORKLOG.md
+
+**Проверки:**
+- API: `GET /api/ingest-runs?limit=3`, `GET /api/lots?limit=5`
+- `python scripts/verify_detail_parser_window.py --days 5 --limit-per-day 80`
+
+**Следующее:**
+- когда Торги опубликуют срез `20260504…20260505`, повторить ingest или дождаться планового job; при необходимости снова `repair_poisoned_ingest_manifests.py`, если манифест снова «залипнет» на error-теле.
+
+---
+
+## 2026-05-05 - Ingest: операционный план без «прогона с 2022», error-JSON Торгов, noop, repair-скрипт
+
+**Что сделано:**
+- [backend/app/services/ingest/discovery.py](backend/app/services/ingest/discovery.py): в режиме `operational` план ограничен окном watermark (синтетические суточные URL от шаблата реестра), без слияния со всеми историческими `data-*.json` из `list.json` (раньше сортировка шла с 2022 года и каждый тик тянул лишние запросы).
+- [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py): ответ `{"error": "..."}` от Торгов (HTTP 200, срез ещё не готов) больше не считается успешным dataset; статус запуска `noop`, если все файлы уже в манифесте; сообщение для UI при `noop`.
+- [backend/app/main.py](backend/app/main.py): при старте закрытие «зависших» `IngestRun` в `running` старше 6 ч (помечаются `failed` с пояснением).
+- [backend/scripts/repair_poisoned_ingest_manifests.py](backend/scripts/repair_poisoned_ingest_manifests.py): удаление из `ingest_manifest` строк `processed` + `records_count=0`, если по URL сейчас отдаётся error-envelope Торгов.
+- [frontend/src/components/StatusBadge.tsx](frontend/src/components/StatusBadge.tsx): бейдж для статуса `noop`.
+- Тесты: `test_ingest_service.py` (error envelope), правки ожиданий в `test_ingest_discovery.py`.
+
+**Затронутые файлы:**
+- backend/app/services/ingest/discovery.py, service.py
+- backend/app/main.py
+- backend/scripts/repair_poisoned_ingest_manifests.py (новый)
+- backend/tests/test_ingest_service.py, test_ingest_discovery.py
+- frontend/src/components/StatusBadge.tsx
+- AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `pytest` в `backend/`: 45 passed
+- `npx tsc --noEmit` в `frontend/`
+
+**Следующее:**
+- при необходимости вручную удалить остальные подозрительные `ingest_manifest` с `records_count=0`, если срез уже опубликован, а манифест мешает (скрипт удаляет только error-envelope).
+
+---
+
+## 2026-05-05 - Фильтры: мультивыбор во всплывающей панели (чекбоксы + Применить)
+
+**Что сделано:**
+- [frontend/src/components/FacetMultiPicker.tsx](frontend/src/components/FacetMultiPicker.tsx): кнопка-сводка, панель с чекбоксами по фасетам, «Очистить» / «Отмена» / «Применить»; черновик до подтверждения; закрытие по клику снаружи и Escape.
+- [frontend/src/pages/LotsPage.tsx](frontend/src/pages/LotsPage.tsx), [frontend/src/pages/TradesPage.tsx](frontend/src/pages/TradesPage.tsx): мультивыбор категорий / типа документа / вида торгов через этот компонент вместо `<select multiple>` и сетки чекбоксов.
+- [frontend/src/facetFilterUi.ts](frontend/src/facetFilterUi.ts): удалены неиспользуемые порог listbox и `valuesFromMultiSelect`; оставлен `FACET_SINGLE_SELECT_MAX` для регион/статус на лотах.
+- [frontend/src/styles.css](frontend/src/styles.css): стили `.facet-picker*`, `.button--compact`; [AGENTS.md](AGENTS.md) — описание UI.
+
+**Затронутые файлы:**
+- frontend/src/components/FacetMultiPicker.tsx (новый)
+- frontend/src/pages/LotsPage.tsx, frontend/src/pages/TradesPage.tsx, frontend/src/facetFilterUi.ts, frontend/src/styles.css
+- AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `npx tsc --noEmit` в `frontend/`
+
+**Следующее:**
+- при необходимости — перенос фокуса в панель при открытии (a11y).
+
+---
+
+## 2026-05-05 - Фильтры: выпадающие списки при малом числе значений фасетов
+
+**Что сделано:**
+- [frontend/src/facetFilterUi.ts](frontend/src/facetFilterUi.ts): пороги `FACET_SINGLE_SELECT_MAX` (40) и `FACET_MULTI_LISTBOX_MAX` (24), хелпер `valuesFromMultiSelect`.
+- [frontend/src/pages/LotsPage.tsx](frontend/src/pages/LotsPage.tsx): при числе значений `region` / `status` в пределах порога — одиночный `<select>` с пунктом «Все»; при числе кодов вида торгов в пределах порога — `<select multiple>` вместо сетки чекбоксов, иначе прежние чекбоксы; свободный ввод региона/статуса, если фасетов много.
+- [frontend/src/pages/TradesPage.tsx](frontend/src/pages/TradesPage.tsx): тип документа и вид торгов — listbox или чекбоксы по тому же порогу.
+- [frontend/src/styles.css](frontend/src/styles.css): стили `select`, `.filters__select`, `.filters__field`; [AGENTS.md](AGENTS.md) — описание UI.
+
+**Затронутые файлы:**
+- frontend/src/facetFilterUi.ts (новый)
+- frontend/src/pages/LotsPage.tsx, frontend/src/pages/TradesPage.tsx, frontend/src/styles.css
+- AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `npx tsc --noEmit` в `frontend/`
+
+**Следующее:**
+- при желании — вынести пороги в env или подобрать по реальной БД.
+
+---
+
+## 2026-05-05 - Фильтры: фасеты, мультивыбор видов торгов, reg_num как текст
+
+**Что сделано:**
+- Backend: `GET /api/lots/facets` и `GET /api/opendata-notices/facets` (distinct поля для UI); `/api/lots` — фильтр `category` списком (повторяющийся query); `/api/opendata-notices` — `document_type` и `bidd_type_code` списками; схемы `LotFacets`, `OpenDataNoticeFacets`; тесты в [backend/tests/test_api.py](backend/tests/test_api.py) (44 passed).
+- Frontend: `request()` с `append` для массивов query; [frontend/src/pages/LotsPage.tsx](frontend/src/pages/LotsPage.tsx) — чекбоксы вида торгов по фасетам, deep-link `category=` повторяющимся параметром; [frontend/src/pages/TradesPage.tsx](frontend/src/pages/TradesPage.tsx) — мультивыбор типа документа и вида торгов; стили `.filters__facet-*` в [frontend/src/styles.css](frontend/src/styles.css).
+- Реестровый номер: не выпадающий список, а **текстовое поле** точного совпадения с API `reg_num` (поле и `fetchNotices.regNum` на странице извещений).
+
+**Затронутые файлы:**
+- backend/app/api.py, backend/app/schemas.py, backend/tests/test_api.py
+- frontend/src/api.ts, frontend/src/types.ts, frontend/src/pages/LotsPage.tsx, frontend/src/pages/TradesPage.tsx, frontend/src/styles.css
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `pytest` в `backend/` (44 passed)
+- `npx tsc --noEmit` в `frontend/`
+
+**Следующее:**
+- при необходимости — частичное совпадение `reg_num` на стороне API (сейчас только точное равенство).
+
+---
+
+## 2026-05-04 - Парсер: characteristic площадь/цена, верификация, майнинг пропусков
+
+**Что сделано:**
+- Бейзлайн: `pytest` 37 passed; `verify_detail_parser_window.py --reanalyze-existing --days 5` — сумма по `is_land_plot=true` (n=160): cadastral=112, area_sqm=107, permitted_use=159, start_price=62 (старые `parsed` в отчётах, без перефетча detail).
+- Майнинг по `detail_parser_verification_202604*.json`: у земельных лотов без `start_price` в JSON нет полей `startPrice`/`priceMin`/аналогов (0 «восстановимых» через новые ключи); низкая доля `start_price` на сегменте земли в основном из-за форм извещений без цены (ИПС и т.п.). Площадь: в выборке встречаются characteristic-коды `SquareZU_project`, `totalAreaRealty` (раньше не участвовали в `_find_characteristic_number`).
+- Доработка [backend/app/services/ingest/detail_parser.py](backend/app/services/ingest/detail_parser.py): коды площади `SquareZU_project`, `totalAreaRealty`; извлечение цены — characteristic `StartPrice`/`InitialPrice`/`MinLotPrice`/`MinPrice`/`AuctionStartPrice`, затем fallback по полям `priceMinVAT`, `minPriceVAT`.
+- Тесты +5 в [backend/tests/test_detail_parser.py](backend/tests/test_detail_parser.py) (всего 22 в модуле; полный прогон 42).
+- Свежие данные: `fetch_latest_opendata.py` -> `data-20260503T0000-20260504T0000-structure-20240401.json`; точечная верификация `verify_detail_parser_real.py --data-file ... --limit 45` -> [data/raw/detail_parser_verification_20260504_refresh.json](data/raw/detail_parser_verification_20260504_refresh.json): `is_land_plot=true` n=10, area_sqm=10/10, start_price=5/10, cadastral=7/10 (малый n, только для smoke после изменений).
+
+**Затронутые файлы:**
+- backend/app/services/ingest/detail_parser.py
+- backend/tests/test_detail_parser.py
+- AGENTS.md (число тестов)
+- WORKLOG.md
+- data/raw/detail_parser_verification_20260504_refresh.json (новый отчёт)
+- data/raw/latest_opendata_meta.json, data/raw/data-20260503T0000-20260504T0000-structure-20240401.json (fetch_latest)
+
+**Проверки:**
+- `.venv312\Scripts\python.exe -m pytest -q`: 42 passed
+- `verify_detail_parser_window.py --reanalyze-existing --days 5` (бейзлайн сумм)
+- `verify_detail_parser_real.py --data-file ... --limit 45` (после правок парсера)
+
+**Следующее:**
+- При полном окне: `verify_detail_parser_window.py --days 10 --limit-per-day 80` на свежих днях и сравнение сегмента `is_land_plot=true` с офлайн-сводкой 2026-05-04.
+- Текстовый fallback цены по описанию — только после появления реальных counterexamples в выборке (в текущем корпусе 0 совпадений по regex).
+
+---
+
 ## 2026-05-04 - Синхронизация с Git: коммит рабочей ветки + игнор data/*.db
 
 **Что сделано:**
