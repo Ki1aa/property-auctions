@@ -23,7 +23,12 @@ type LotsQueryState = {
 };
 
 function parseLotsSort(value: string | null): LotsSort {
-  if (value === "price_per_sotka_asc" || value === "price_per_sotka_desc" || value === "updated_at_desc") {
+  if (
+    value === "price_per_sotka_asc" ||
+    value === "price_per_sotka_desc" ||
+    value === "discount_to_baseline_desc" ||
+    value === "updated_at_desc"
+  ) {
     return value;
   }
   return DEFAULT_SORT;
@@ -303,6 +308,7 @@ export function LotsPage() {
             }}
           >
             <option value="updated_at_desc">По дате обновления</option>
+            <option value="discount_to_baseline_desc">По дисконту к baseline</option>
             <option value="price_per_sotka_asc">Старт. цена за сотку (дешевле первые)</option>
             <option value="price_per_sotka_desc">Старт. цена за сотку (дороже первые)</option>
           </select>

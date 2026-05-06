@@ -2,6 +2,8 @@
 
 In dev we rely on Base.metadata.create_all() which only creates missing tables.
 When ORM models add new columns, run this script once to ALTER existing tables.
+The script also creates missing indexes. SQLite cannot add foreign keys to an
+existing table without rebuilding it, so missing FKs are reported as warnings.
 For PostgreSQL / production use Alembic migrations instead.
 """
 from __future__ import annotations
@@ -60,6 +62,40 @@ def sync() -> None:
                 sql = f'ALTER TABLE "{table.name}" ADD COLUMN {_column_sql(column)}'
                 print(f"applying: {sql}")
                 conn.execute(text(sql))
+
+        inspector = inspect(conn)
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+
+            existing_indexes = {idx["name"] for idx in inspector.get_indexes(table.name)}
+            for index in table.indexes:
+                if index.name in existing_indexes:
+                    continue
+                print(f"creating index: {index.name}")
+                index.create(bind=conn, checkfirst=True)
+
+            existing_fks = {
+                (
+                    tuple(fk.get("constrained_columns") or []),
+                    fk.get("referred_table"),
+                    tuple(fk.get("referred_columns") or []),
+                )
+                for fk in inspector.get_foreign_keys(table.name)
+            }
+            for fk in table.foreign_key_constraints:
+                expected = (
+                    tuple(column.name for column in fk.columns),
+                    fk.referred_table.name,
+                    tuple(element.column.name for element in fk.elements),
+                )
+                if expected not in existing_fks:
+                    print(
+                        "warning: missing foreign key on existing SQLite table "
+                        f"{table.name}({', '.join(expected[0])}) -> "
+                        f"{expected[1]}({', '.join(expected[2])}); "
+                        "SQLite requires table rebuild or fresh DB/Alembic migration."
+                    )
 
     print("dev schema sync complete")
 

@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchLot } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
-import { TradesMap } from "../components/TradesMap";
 import { LotDetail, MapPoint } from "../types";
+
+const TradesMap = lazy(() =>
+  import("../components/TradesMap").then((module) => ({ default: module.TradesMap }))
+);
 
 function formatPrice(value: number | null): string {
   if (value === null || value === undefined) return "—";
@@ -21,6 +24,18 @@ function formatArea(value: number | null): string {
 function formatDate(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleString("ru-RU");
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function confidenceLabel(value: string | null): string {
+  if (value === "high") return "Высокая";
+  if (value === "medium") return "Средняя";
+  if (value === "low") return "Низкая";
+  return "—";
 }
 
 function pkkLink(cadastral: string | null): string | null {
@@ -105,6 +120,26 @@ export function LotDetailPage() {
           <span className="card__label">Старт. цена за м²</span>
           <span title="Из извещения, не рыночная оценка">{formatPrice(lot.start_price_per_sqm)}</span>
         </div>
+        <div className="card__row">
+          <span className="card__label">Baseline за сотку</span>
+          <span title="Медиана по уже загруженным торгам, не внешняя рыночная оценка">
+            {formatPrice(lot.baseline_price_per_sotka)}
+          </span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Дисконт к baseline</span>
+          <span className={lot.discount_to_baseline && lot.discount_to_baseline > 0 ? "cell--good" : ""}>
+            {formatPercent(lot.discount_to_baseline)}
+          </span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Уверенность оценки</span>
+          <span>{confidenceLabel(lot.valuation_confidence)}</span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Основание baseline</span>
+          <span>{lot.valuation_reason || "—"}</span>
+        </div>
         <div className="card__row"><span className="card__label">Дата начала</span><span>{formatDate(lot.start_date)}</span></div>
         <div className="card__row"><span className="card__label">Дата окончания</span><span>{formatDate(lot.end_date)}</span></div>
         <div className="card__row"><span className="card__label">Организатор</span><span>{lot.organizer_name || "—"}</span></div>
@@ -152,7 +187,9 @@ export function LotDetailPage() {
       {mapPoint && (
         <section className="section">
           <h2>На карте</h2>
-          <TradesMap points={[mapPoint]} height="320px" />
+          <Suspense fallback={<p className="loading">Загрузка карты…</p>}>
+            <TradesMap points={[mapPoint]} height="320px" />
+          </Suspense>
         </section>
       )}
 

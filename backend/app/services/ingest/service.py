@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 DETAIL_FETCH_RETRY_BACKOFF_SEC = 1.5
 STRUCTURE_VERSION_RE = re.compile(r"structure-(\d+)")
+SOURCE_UNAVAILABLE_MARKERS = (
+    "torgi opendata:",
+    "connecterror",
+    "connecttimeout",
+    "connection attempts failed",
+    "connection timed out",
+    "timed out",
+    "server disconnected",
+    "temporary failure",
+)
 
 
 def _payload_hash(payload: dict) -> str:
@@ -48,14 +58,27 @@ def _is_torgi_opendata_error_envelope(payload: Any) -> bool:
     return len(_pick_items(payload)) == 0
 
 
-def _friendly_ingest_error(*, error: str, source_url: str | None = None) -> str:
+def _classify_ingest_error(error: str) -> str:
     lowered = error.lower()
-    if "torgi opendata:" in lowered:
+    if "unsupported structure version" in lowered:
+        return "schema_migration_required"
+    if any(marker in lowered for marker in SOURCE_UNAVAILABLE_MARKERS):
+        return "source_unavailable"
+    return "file_processing_error"
+
+
+def _friendly_ingest_error(
+    *, error: str, source_url: str | None = None, error_kind: str | None = None
+) -> str:
+    kind = error_kind or _classify_ingest_error(error)
+    if kind == "source_unavailable":
         url_part = f" ({source_url})" if source_url else ""
         return (
             "Источник Torgi временно не отдает один из файлов (срез еще не опубликован или недоступен)."
             f"{url_part} Попробуйте повторить позже."
         )
+    if kind == "schema_migration_required":
+        return "Источник Torgi прислал файл с неподдерживаемой версией структуры. Нужна миграция парсера схемы."
     return error
 
 
@@ -181,6 +204,7 @@ def _write_manifest(
     sha256: str,
     status: str,
     records_count: int,
+    error_kind: str | None = None,
     error: str | None = None,
 ) -> None:
     manifest = IngestManifest(
@@ -195,6 +219,7 @@ def _write_manifest(
         processed_at=datetime.now(timezone.utc),
         status=status,
         records_count=records_count,
+        error_kind=error_kind,
         error=error,
     )
     db.add(manifest)
@@ -203,11 +228,7 @@ def _write_manifest(
 
 async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     mode_value = (mode or settings.ingest_mode or "operational").lower()
-    last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
-    discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
-    source_url = discovery_plan.files[-1].source_url if discovery_plan.files else settings.ingest_source_url
-
-    run = IngestRun(status="running", source_url=source_url)
+    run = IngestRun(status="running", source_url=settings.ingest_source_url)
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -219,11 +240,18 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     failed_files = 0
     last_failed_url: str | None = None
     last_error: str | None = None
+    last_error_kind: str | None = None
     detail_fetch_count = 0
     allowed_regions = _target_region_codes()
     izhs_keywords = split_keywords(settings.izhs_keywords)
 
     try:
+        last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
+        discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
+        source_url = discovery_plan.files[-1].source_url if discovery_plan.files else settings.ingest_source_url
+        run.source_url = source_url
+        db.commit()
+
         for file_ref in discovery_plan.files:
             try:
                 payload, payload_sha = await fetch_json_payload_with_meta(file_ref.source_url)
@@ -238,6 +266,7 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
 
                 supported_versions = _supported_structure_versions()
                 if file_ref.schema_version and file_ref.schema_version not in supported_versions:
+                    error_text = f"Unsupported structure version: {file_ref.schema_version}"
                     save_raw_payload(payload, run.id)
                     _write_manifest(
                         db,
@@ -245,8 +274,12 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                         sha256=payload_sha,
                         status="schema_migration_required",
                         records_count=0,
-                        error=f"Unsupported structure version: {file_ref.schema_version}",
+                        error_kind="schema_migration_required",
+                        error=error_text,
                     )
+                    last_failed_url = file_ref.source_url
+                    last_error = error_text
+                    last_error_kind = "schema_migration_required"
                     failed_files += 1
                     continue
 
@@ -293,12 +326,14 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                 logger.exception("Ingest file failed: %s", file_ref.source_url)
                 last_failed_url = file_ref.source_url
                 last_error = str(exc)
+                last_error_kind = _classify_ingest_error(last_error)
                 _write_manifest(
                     db,
                     file_ref=file_ref,
                     sha256=_payload_hash({"source_url": file_ref.source_url, "run_id": run.id}),
                     status="failed",
                     records_count=0,
+                    error_kind=last_error_kind,
                     error=str(exc),
                 )
                 failed_files += 1
@@ -316,10 +351,18 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
         run.fetched_count = fetched_count
         run.upserted_count = upserted_count
         run.changed_count = changed_count
+        run.processed_files = processed_files
+        run.failed_files = failed_files
+        run.last_error_source_url = last_failed_url
+        run.error_kind = last_error_kind
         run.finished_at = datetime.now(timezone.utc)
         if failed_files > 0:
             if last_error:
-                friendly = _friendly_ingest_error(error=last_error, source_url=last_failed_url)
+                friendly = _friendly_ingest_error(
+                    error=last_error,
+                    source_url=last_failed_url,
+                    error_kind=last_error_kind,
+                )
                 run.error_message = f"{friendly} (processed={processed_files}, failed={failed_files})"
             else:
                 run.error_message = f"processed={processed_files}, failed={failed_files}"
@@ -329,7 +372,17 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     except Exception as exc:  # noqa: BLE001
         logger.exception("Ingest failed")
         run.status = "failed"
-        run.error_message = str(exc)
+        last_error = str(exc)
+        last_error_kind = _classify_ingest_error(last_error)
+        run.processed_files = processed_files
+        run.failed_files = failed_files
+        run.last_error_source_url = last_failed_url
+        run.error_kind = last_error_kind
+        run.error_message = _friendly_ingest_error(
+            error=last_error,
+            source_url=last_failed_url,
+            error_kind=last_error_kind,
+        )
         run.finished_at = datetime.now(timezone.utc)
         db.commit()
         raise
@@ -338,6 +391,8 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
         "fetched_count": fetched_count,
         "upserted_count": upserted_count,
         "changed_count": changed_count,
+        "processed_files": processed_files,
+        "failed_files": failed_files,
     }
 
 

@@ -14,7 +14,11 @@ export type NoticeListPage = {
   offset: number;
 };
 
-export type LotsSort = "updated_at_desc" | "price_per_sotka_asc" | "price_per_sotka_desc";
+export type LotsSort =
+  | "updated_at_desc"
+  | "price_per_sotka_asc"
+  | "price_per_sotka_desc"
+  | "discount_to_baseline_desc";
 
 export type Lot = {
   id: number;
@@ -34,6 +38,14 @@ export type Lot = {
   start_price_per_sotka: number | null;
   /** Rub per m² from notice. */
   start_price_per_sqm: number | null;
+  /** Internal auction baseline, not external market valuation. */
+  baseline_price_per_sotka: number | null;
+  /** Positive means the lot is cheaper than the internal baseline. */
+  discount_to_baseline: number | null;
+  valuation_confidence: "low" | "medium" | "high" | string | null;
+  valuation_baseline_scope: string | null;
+  valuation_baseline_sample_size: number | null;
+  valuation_reason: string | null;
 };
 
 export type LotListPage = {
@@ -73,6 +85,10 @@ export type IngestRun = {
   fetched_count: number;
   upserted_count: number;
   changed_count: number;
+  processed_files: number;
+  failed_files: number;
+  last_error_source_url: string | null;
+  error_kind: string | null;
   error_message: string | null;
 };
 

@@ -110,6 +110,16 @@
 - `link_lots_to_notices.py --dry-run` не нашёл новых совпадений: 5207 lots total, 2289 already linked, 2918 still unlinked, `linked_via_href=0`, `linked_via_reg_num=0`; apply-прогон не запускался, потому что он не изменил бы БД.
 - Server-side пагинация `/api/opendata-notices` выполнена: backend возвращает `{ items, total, limit, offset }`, frontend-страница Notices показывает total и переключает страницы по 50 записей.
 
+**Выполнено 2026-05-06:**
+- Улучшена наблюдаемость ingest:
+  - `ingest_runs` хранит `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`;
+  - `ingest_manifest` хранит `error_kind` для файловых ошибок;
+  - `run_ingest()` классифицирует `source_unavailable`, `schema_migration_required`, `file_processing_error`;
+  - `/api/ingest-runs` возвращает новые поля;
+  - UI `/ingest` показывает счётчик файлов, тип сбоя и последний URL ошибки.
+- Добавлена Alembic-ревизия `20260506_06_add_ingest_observability.py`.
+- Выполнен `python scripts/dev_sync_schema.py` для локальной SQLite.
+
 **Задачи:**
 - Повторить live-верификацию `detail_parser` на свежем окне данных после доступности Торгов:
   - `python scripts/verify_detail_parser_window.py --days 10 --limit-per-day 80`;
@@ -117,14 +127,11 @@
 - Закрыть исторический разрыв `Lot` -> `OpenDataNotice`:
   - прогнать `backend/scripts/link_lots_to_notices.py`;
   - добавить в WORKLOG фактическое число слинкованных записей.
-- Улучшить наблюдаемость ingest:
-  - в API и UI показывать `processed_files`, `failed_files`, последний `source_url` ошибки;
-  - в `IngestManifest` различать временную недоступность источника и настоящую ошибку схемы.
 
 **Критерий готовности:**
 - Есть измеренный baseline качества парсера на свежем окне.
 - Исторические лоты максимально слинкованы с raw notices.
-- Страница ingest объясняет сбои без чтения логов сервера.
+- Страница ingest объясняет сбои без чтения логов сервера. Выполнено локально 2026-05-06.
 
 ## 3. НСПД как надежный кадастровый слой
 
@@ -152,21 +159,22 @@
 
 Срок: 1 неделя.
 
+**Выполнено 2026-05-06:**
+- Добавлен внутренний baseline по уже загруженным торгам без новой таблицы:
+  - медиана `start_price_per_sotka` считается на лету по каскаду `region+category -> region -> category -> global`;
+  - для каждого лота возвращаются `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`, `valuation_baseline_scope`, `valuation_baseline_sample_size`, `valuation_reason`;
+  - добавлена сортировка `/api/lots?sort=discount_to_baseline_desc`;
+  - CSV export получил baseline-колонки;
+  - Dashboard показывает shortlist ИЖС-кандидатов по дисконту.
+
 **Задачи:**
-- Посчитать внутренний baseline по уже загруженным торгам:
-  - медиана `start_price_per_sotka` по региону;
-  - медиана по региону + виду торгов;
-  - медиана по региону + ВРИ, если ВРИ заполнен.
-- Добавить таблицу или материализуемый расчет `ValuationBaseline`.
-- В API лота вернуть:
-  - `baseline_price_per_sotka`;
-  - `discount_to_baseline`;
-  - `valuation_confidence`.
-- На странице лотов добавить сортировку и фильтр по дисконту.
+- Уточнить baseline после появления НСПД/геометрии и большего числа качественных данных по целевым регионам.
+- Позже, если расчёт станет тяжелым, заменить on-the-fly baseline на таблицу или материализуемый расчёт `ValuationBaseline`.
+- Добавить фильтр по минимальному дисконту, если он понадобится для рабочих сценариев.
 
 **Критерий готовности:**
-- Даже без Циан/Авито система умеет ранжировать лоты относительно собственной базы торгов.
-- Пользователь видит, что это baseline по торгам, а не рыночная оценка.
+- Даже без Циан/Авито система умеет ранжировать лоты относительно собственной базы торгов. Выполнено 2026-05-06.
+- Пользователь видит, что это baseline по торгам, а не рыночная оценка. Выполнено 2026-05-06.
 
 ## 5. Рыночные аналоги
 
@@ -217,6 +225,13 @@
 
 Срок: параллельно после стабилизации MVP.
 
+**Выполнено 2026-05-06:**
+- Frontend CI расширен: кроме `npx tsc --noEmit` теперь запускаются `npm run test` и `npm run build`.
+- FastAPI startup переведён с deprecated `@app.on_event` на lifespan; APScheduler останавливается на shutdown.
+- `TradesMap` больше не использует `setHTML`; popup собирается через DOM/textContent.
+- `dev_sync_schema.py` теперь добавляет недостающие индексы для существующей SQLite и предупреждает про FK, которые SQLite нельзя добавить без rebuild таблицы.
+- `MapPage` и `TradesMap` вынесены в lazy chunks; основной Vite bundle стал меньше, MapLibre остаётся отдельным крупным async chunk.
+
 **Задачи:**
 - Перейти на PostgreSQL:
   - проверить `alembic upgrade head`;
@@ -225,11 +240,9 @@
 - Расширить CI:
   - `ruff`;
   - frontend lint;
-  - `npm run build`;
   - backend migration smoke-test.
 - Улучшить frontend-надежность:
   - error boundary;
-  - lazy-load `MapPage`;
   - минимальные component/integration tests для фильтров.
 
 **Критерий готовности:**
@@ -238,6 +251,6 @@
 ## Приоритет на следующий рабочий заход
 
 1. Для внешнего ИИ с российским IP: выполнить задачи A и B из раздела 0 и вернуть артефакты в `data/raw/`.
-2. Для текущего Codex/VPN-окружения: улучшить наблюдаемость ingest без обращения к Торгам.
+2. Для текущего Codex/VPN-окружения: начать следующий локальный слой ценности без обращения к Торгам — baseline-оценку по собственной базе торгов.
 3. После получения live-артефактов от внешнего ИИ: обновить coverage baseline, проверить parser gaps и решить, нужно ли править `detail_parser`.
 4. После НСПД discovery начинать проектирование `CadastralEnrichment`, потому что без надежного кадастрового слоя valuation будет стоять на зыбком основании.

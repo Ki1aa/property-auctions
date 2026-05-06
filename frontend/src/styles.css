@@ -473,6 +473,15 @@ tr:hover td {
   white-space: nowrap;
 }
 
+.cell--hint {
+  cursor: help;
+}
+
+.cell--good {
+  color: var(--success);
+  font-weight: 700;
+}
+
 .cell--name {
   max-width: 360px;
   overflow-wrap: anywhere;
@@ -487,6 +496,12 @@ tr:hover td {
 .ingest-runs__error-col {
   width: 360px;
   max-width: min(360px, 45vw);
+}
+
+.ingest-runs__url-col {
+  width: 280px;
+  max-width: min(280px, 36vw);
+  overflow-wrap: anywhere;
 }
 
 .cell--mono {

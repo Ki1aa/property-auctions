@@ -20,7 +20,7 @@
 - НСПД (`nspd.gov.ru`) - кадастр и пространственные данные **(не подключён, в roadmap)**.
 - Циан, Авито, Домклик - рыночные аналоги **(не подключены, в roadmap)**.
 
-**Текущая стадия:** рабочий MVP в dev-режиме на SQLite. Реализован ingest ГИС Торги с фильтрацией по региону и обогащением кадастровыми полями из деталей извещений. Фокус на ИЖС-лотах. PostgreSQL, НСПД, Циан, оценка по аналогам, инвестиционный скоринг - в roadmap.
+**Текущая стадия:** рабочий MVP в dev-режиме на SQLite. Реализован ingest ГИС Торги с фильтрацией по региону и обогащением кадастровыми полями из деталей извещений. Есть внутренняя baseline-оценка по уже загруженным торгам (`baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`) для первичного ранжирования, но это ещё не рыночная оценка по Циан/Авито. PostgreSQL, НСПД, рыночные аналоги и полноценный инвестиционный скоринг - в roadmap.
 
 ---
 
@@ -54,7 +54,7 @@
 ```
 backend/
   app/
-    main.py            # FastAPI app, CORS, startup-хуки, авто-create_all
+    main.py            # FastAPI app, CORS, lifespan startup/shutdown, авто-create_all
     api.py             # все REST-эндпоинты (/api/lots пагинация+CSV export, /api/lots/facets, /api/lots/{id}, /api/lots-map, /api/ingest-runs, /api/opendata-notices пагинация, /api/opendata-notices/facets)
     models.py          # SQLAlchemy: Organizer, Lot, LotSnapshot, IngestRun, IngestManifest, AlertEvent, OpenDataNotice
     schemas.py         # Pydantic-схемы ответов API
@@ -73,7 +73,7 @@ backend/
         telegram.py    # send_telegram_message
   alembic/
     env.py
-    versions/          # 5 миграций: init, opendata_notices, ingest_manifest, lot_land_fields, lot↔opendata_notice link
+    versions/          # 6 миграций: init, opendata_notices, ingest_manifest, lot_land_fields, lot↔opendata_notice link, ingest observability
   scripts/
     fetch_latest_opendata.py        # ручная выгрузка свежего data-*.json
     verify_detail_parser_real.py    # верификация detail_parser (online через --data-url, offline через --data-file/--reanalyze; сегментированный coverage)
@@ -83,7 +83,7 @@ backend/
     reprocess_lots_offline.py       # офлайн-репроцессинг существующих Lot: пересчёт is_izhs_candidate + добор кадастра из LotSnapshot.payload
     link_lots_to_notices.py         # backfill Lot.opendata_notice_id по существующим парам href/reg_num
     repair_poisoned_ingest_manifests.py  # ingest_manifest: processed+0 при error-envelope или при несоответствии (живой URL непустой, в БД 0 записей)
-    dev_sync_schema.py              # dev-only: ALTER TABLE для существующей SQLite под новые поля моделей
+    dev_sync_schema.py              # dev-only: ALTER TABLE + недостающие индексы для существующей SQLite; FK только предупреждением
   tests/                            # pytest (api, ingest client/discovery/service/upsert, normalizer, detail_parser, retry, notice-link)
   requirements.txt
   alembic.ini
@@ -104,7 +104,7 @@ frontend/
       FacetMultiPicker.tsx  # мультивыбор фасетов: кнопка, панель с чекбоксами, Применить
       LotsTable.tsx
       TradesTable.tsx
-      TradesMap.tsx     # MapLibre, авто-fitBounds для нескольких точек, flyTo для одной
+      TradesMap.tsx     # MapLibre, безопасные popup через setDOMContent, авто-fitBounds/flyTo; грузится лениво
     pages/
       DashboardPage.tsx     # /
       TradesPage.tsx        # /notices
@@ -191,7 +191,7 @@ flowchart LR
 - Watermark: в `operational` режиме старт = `max(IngestManifest.data_to)` для провайдера/датасета.
 - Schema versioning: только `SUPPORTED_STRUCTURE_VERSIONS` (по умолчанию `20240401`) обрабатываются; остальные сохраняются в raw и помечаются `schema_migration_required`.
 - Операционный ingest: план файлов — только окно watermark от последнего `data_to` (без полного слияния с историческим списком из реестра), иначе сортировка начиналась бы с самых старых срезов.
-- На старте backend при `RUN_INGEST_ON_STARTUP=true` и пустом `ingest_runs` запускается один operational ingest (`@app.on_event("startup")` в [backend/app/main.py](backend/app/main.py)). По умолчанию в [backend/app/config.py](backend/app/config.py) флаг `false`; в [.env.example](.env.example) для локального dev указано `true`. Долго висящие `IngestRun` в `running` закрываются при старте как прерванные.
+- На старте backend через FastAPI lifespan при `RUN_INGEST_ON_STARTUP=true` и пустом `ingest_runs` запускается один operational ingest ([backend/app/main.py](backend/app/main.py)). По умолчанию в [backend/app/config.py](backend/app/config.py) флаг `false`; в [.env.example](.env.example) для локального dev указано `true`. Долго висящие `IngestRun` в `running` закрываются при старте как прерванные. На shutdown останавливается APScheduler.
 
 ---
 
@@ -277,10 +277,10 @@ python scripts/repair_poisoned_ingest_manifests.py
 - Не пушить ничего в remote и не делать force-операции без явной просьбы.
 
 **Технические правила:**
-- В dev-режиме `Base.metadata.create_all()` в [backend/app/main.py](backend/app/main.py) - сознательный компромисс. При изменении моделей в [backend/app/models.py](backend/app/models.py) **обязательно** создавать Alembic-ревизию **И** запускать [backend/scripts/dev_sync_schema.py](backend/scripts/dev_sync_schema.py), потому что `create_all()` не делает ALTER на уже существующих таблицах.
+- В dev-режиме `Base.metadata.create_all()` в [backend/app/main.py](backend/app/main.py) - сознательный компромисс. При изменении моделей в [backend/app/models.py](backend/app/models.py) **обязательно** создавать Alembic-ревизию **И** запускать [backend/scripts/dev_sync_schema.py](backend/scripts/dev_sync_schema.py), потому что `create_all()` не делает ALTER на уже существующих таблицах. `dev_sync_schema.py` добавляет недостающие колонки и индексы; внешние ключи в существующей SQLite-таблице не добавляет, а предупреждает о необходимости fresh DB/rebuild/Alembic.
 - При изменении API синхронизировать [frontend/src/types.ts](frontend/src/types.ts) и [frontend/src/api.ts](frontend/src/api.ts).
 - Новые зависимости фронта - через `npm install <pkg>` в `frontend/`, бекенда - правкой [backend/requirements.txt](backend/requirements.txt) с фиксированной версией.
-- Карта (`maplibre-gl`) тяжёлая - бандл около 1.2 МБ. При оптимизации использовать динамический импорт `MapPage`.
+- Карта (`maplibre-gl`) тяжёлая и загружается через `React.lazy`: `MapPage` и `TradesMap` не должны импортироваться статически из основного маршрута без необходимости.
 
 **Рабочий процесс:**
 1. Прочитать AGENTS.md (этот файл) и [WORKLOG.md](WORKLOG.md) - минимум 1-3 свежих записи.
@@ -301,19 +301,21 @@ python scripts/repair_poisoned_ingest_manifests.py
 - **Retry detail-fetch**: один retry с backoff 1.5s в `_fetch_detail_with_retry` ([backend/app/services/ingest/service.py](backend/app/services/ingest/service.py)).
 - **ИЖС-детектор** через keyword match (`IZHS_KEYWORDS`).
 - **Связь Lot ↔ OpenDataNotice**: FK `Lot.opendata_notice_id`, ingest пишет обе таблицы атомарно, `/api/lots/{id}` возвращает `notice_payload` (raw opendata-извещение) - [backend/app/models.py](backend/app/models.py), [backend/app/api.py](backend/app/api.py).
-- REST API: `/health`, `/api/lots` (ответ `{ items, total, limit, offset }`; фильтры; `sort`; `start_price_per_sotka` / `start_price_per_sqm` из извещения; `category` повторяющимся query для OR по видам торгов), `GET /api/export/lots.csv` (те же фильтры), `/api/lots/facets`, `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`), `/api/lots-map`, `/api/ingest-runs`, `/api/opendata-notices` (ответ `{ items, total, limit, offset }`; фильтры `document_type` / `bidd_type_code` списками и `reg_num`), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
+- REST API: `/health`, `/api/lots` (ответ `{ items, total, limit, offset }`; фильтры; `sort`; `start_price_per_sotka` / `start_price_per_sqm` из извещения; `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`; `category` повторяющимся query для OR по видам торгов; сортировка `discount_to_baseline_desc`), `GET /api/export/lots.csv` (те же фильтры + baseline-колонки), `/api/lots/facets`, `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`, baseline-поля), `/api/lots-map`, `/api/ingest-runs` (история запусков + `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`), `/api/opendata-notices` (ответ `{ items, total, limit, offset }`; фильтры `document_type` / `bidd_type_code` списками и `reg_num`), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
+- Внутренняя baseline-оценка без внешних маркетплейсов: медиана ₽/сотка по каскаду `region+category -> region -> category -> global`, дисконт к baseline, confidence и reason; Dashboard показывает shortlist ИЖС-кандидатов по дисконту.
+- Наблюдаемость ingest: `IngestRun` и `IngestManifest` различают `source_unavailable`, `schema_migration_required`, `file_processing_error`; UI `/ingest` показывает обработанные/упавшие файлы и последний URL ошибки.
 - Планировщик ingest (APScheduler, по умолчанию раз в сутки) - [backend/app/scheduler.py](backend/app/scheduler.py).
 - Telegram-уведомления (дедупликация через AlertEvent; опционально только ИЖС — `TELEGRAM_ALERT_ONLY_IZHS`) - [backend/app/services/alerts/](backend/app/services/alerts).
-- Pytest: 45+ тестов (API + notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены).
+- Pytest: 48 тестов (API + baseline, notice_payload, ingest client/discovery/service с region+detail+retry+notice-link, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены).
 - SPA: страницы Dashboard / Notices (server-side пагинация по 50, фильтры document_type / bidd_type_code / reg_num) / Lots (пагинация, сортировка по ₽/сотка, CSV, регион/тип — как раньше) / LotDetail / Map / IngestRuns - [frontend/src/](frontend/src).
-- TypeScript-проверка чистая, Vite production build проходит.
+- TypeScript-проверка чистая, frontend tests проходят, Vite production build проходит. MapLibre вынесен в отдельный async chunk; предупреждение о крупном chunk теперь относится к лениво загружаемой карте.
 
 **Не сделано / на паузе:**
 - НСПД, Циан/Авито/Домклик - не подключены (нужна сеть к этим хостам, сейчас VPN-on блокирует).
-- Нет оценки рыночной стоимости и инвестиционного скоринга.
+- Нет оценки рыночной стоимости по внешним аналогам и полноценного инвестиционного скоринга. Есть только внутренняя baseline-оценка по собственной базе торгов.
 - Telegram реально не настроен (`.env` содержит пустые `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`).
-- Нет линтеров в CI (есть минимальный workflow: pytest + tsc).
-- Frontend не имеет тестов и error boundary.
+- Нет линтеров в CI (есть pytest + frontend `tsc` + `npm run test` + `npm run build`).
+- Frontend не имеет error boundary.
 - Реальный замер выигрыша coverage от текстовых fallback'ов парсера возможен только при VPN-off.
 - 2941 существующих лота не слинкованы с notices (исторические записи до общей точки записи). Выровняется автоматически после нескольких live-ingest проходов.
 
@@ -326,14 +328,16 @@ python scripts/repair_poisoned_ingest_manifests.py
 1. **Интеграция НСПД**: клиент к `nspd.gov.ru` для пространственных и кадастровых данных (геометрия участка, точная площадь, ВРИ, категория земель). Это даст надёжные данные вместо текстового парсинга.
 2. **Верификация detail-parser на свежем live-окне после VPN-off**: прогнать `verify_detail_parser_window.py --days 10 --limit-per-day 80`, замерить, что текстовые fallback'и из 20260504 подняли coverage `area_sqm` / `permitted_use` / `cadastral_number` на сегменте `is_land_plot=true` (текущая офлайн-сводка: 67 / 99 / 70%).
 3. **Циан**: HTTP-клиент, модель `MarketComparable`, сохранение аналогов по локации/площади/ВРИ.
-4. **Оценка по аналогам**: алгоритм медианы ₽/сотка с поправками. Модель `Valuation`.
-5. **Скоринг инвестиционной привлекательности**: формула `discount_to_market * liquidity * location_score - risk`. Колонка `investment_score` в API и фронте, сортировка/фильтр по нему. Возможен v0 без рынка (₽/сотка по региону/ВРИ как baseline).
+4. **Оценка по аналогам**: подключить рыночные аналоги и модель `Valuation`. Внутренний baseline по торгам уже есть, но он не заменяет рынок.
+5. **Скоринг инвестиционной привлекательности**: формула `discount_to_market * liquidity * location_score - risk`. Колонка `investment_score` в API и фронте, сортировка/фильтр по нему.
 6. **Smart-алерты**: пуш в Telegram только при `score >= threshold`, а не на любое изменение лота.
-7. **Наблюдаемость ingest**: показывать `processed_files`, `failed_files`, последний `source_url` ошибки; различать временную недоступность источника и настоящую ошибку схемы.
-8. **PostgreSQL prod-сетап**: переключить `DATABASE_URL`, отключить `create_all()`, поднять docker-compose с реальной БД, прогнать `alembic upgrade head`.
-9. **CI**: расширить GitHub Actions — ruff, eslint (сейчас pytest + tsc).
-10. **Frontend code-splitting** карты (`React.lazy` для `MapPage`), error boundary.
-11. **Авито/Домклик** как дополнительные источники аналогов.
+7. **PostgreSQL prod-сетап**: переключить `DATABASE_URL`, отключить `create_all()`, поднять docker-compose с реальной БД, прогнать `alembic upgrade head`.
+8. **CI**: расширить GitHub Actions — ruff, eslint, backend migration smoke-test (pytest + frontend `tsc`/tests/build уже есть).
+9. **Frontend reliability**: error boundary; дальнейшая оптимизация chunk'ов при необходимости.
+10. **Авито/Домклик** как дополнительные источники аналогов.
 
 Закрыто в 2026-05-04: пункт «Объединить `lots` ↔ `opendata_notices`» (FK + общий ingest-путь + UI-блок «Сырое извещение»).
 Закрыто в 2026-05-05: пункт «Server-side пагинация `/api/opendata-notices`» (ответ `{ items, total, limit, offset }` + UI-пагинация Notices).
+Закрыто в 2026-05-06: пункт «Наблюдаемость ingest» (`processed_files`, `failed_files`, `last_error_source_url`, `error_kind` в БД/API/UI).
+Закрыто в 2026-05-06: пункт «Baseline-оценка без внешних маркетплейсов» (`baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`, сортировка `discount_to_baseline_desc`, shortlist на Dashboard).
+Закрыто в 2026-05-06: технические риски `TradesMap.setHTML` XSS, deprecated FastAPI `@app.on_event`, frontend CI tests/build, dev SQLite index-sync, lazy MapLibre chunk.

@@ -17,10 +17,21 @@ function formatDate(value: string | null): string {
   return new Date(value).toLocaleString("ru-RU");
 }
 
+function formatPrice(value: number | null): string {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value) + " ₽";
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 export function DashboardPage() {
   const [metrics, setMetrics] = useState<Metrics>(initialMetrics);
   const [recentNotices, setRecentNotices] = useState<Notice[]>([]);
   const [recentLots, setRecentLots] = useState<Lot[]>([]);
+  const [opportunityLots, setOpportunityLots] = useState<Lot[]>([]);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -44,10 +55,11 @@ export function DashboardPage() {
     async function load() {
       setIsLoading(true);
       try {
-        const [lotsPage, noticesPage, runs] = await Promise.all([
+        const [lotsPage, noticesPage, runs, opportunitiesPage] = await Promise.all([
           fetchLots({ limit: 5, offset: 0 }),
           fetchNotices({ limit: 5, offset: 0 }),
           fetchIngestRuns(1),
+          fetchLots({ limit: 10, offset: 0, isIzhs: true, sort: "discount_to_baseline_desc" }),
         ]);
         if (cancelled) return;
         setMetrics({
@@ -57,6 +69,11 @@ export function DashboardPage() {
         });
         setRecentNotices(normalizePageItems<Notice>(noticesPage));
         setRecentLots(normalizePageItems<Lot>(lotsPage));
+        setOpportunityLots(
+          normalizePageItems<Lot>(opportunitiesPage)
+            .filter((lot) => lot.discount_to_baseline !== null)
+            .slice(0, 5)
+        );
         setError("");
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -95,6 +112,45 @@ export function DashboardPage() {
           <span className="metric__sub">{metrics.lastRun ? formatDate(metrics.lastRun.finished_at ?? metrics.lastRun.started_at) : ""}</span>
           <Link className="metric__link" to="/ingest">История загрузок →</Link>
         </div>
+      </section>
+
+      <section className="section">
+        <div className="section__header">
+          <h2>Потенциально интересные ИЖС-кандидаты по всей базе</h2>
+          <Link to="/lots?is_izhs=true&sort=discount_to_baseline_desc" className="section__more">Все →</Link>
+        </div>
+        {opportunityLots.length === 0 && !isLoading ? (
+          <p className="empty">Пока нет ИЖС-кандидатов с достаточными данными для baseline.</p>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Лот</th>
+                <th>Регион</th>
+                <th className="cell--num">₽/сотка</th>
+                <th className="cell--num">Baseline</th>
+                <th className="cell--num">Дисконт</th>
+                <th>Основание</th>
+              </tr>
+            </thead>
+            <tbody>
+              {opportunityLots.map((lot) => (
+                <tr key={lot.id}>
+                  <td className="cell--name">
+                    <Link to={`/lots/${lot.id}`}>{lot.title}</Link>
+                  </td>
+                  <td>{lot.region || "—"}</td>
+                  <td className="cell--num">{formatPrice(lot.start_price_per_sotka)}</td>
+                  <td className="cell--num">{formatPrice(lot.baseline_price_per_sotka)}</td>
+                  <td className={lot.discount_to_baseline && lot.discount_to_baseline > 0 ? "cell--num cell--good" : "cell--num"}>
+                    {formatPercent(lot.discount_to_baseline)}
+                  </td>
+                  <td>{lot.valuation_reason || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section className="section">

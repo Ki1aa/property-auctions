@@ -74,12 +74,22 @@ def test_run_ingest_writes_manifest_and_is_idempotent(monkeypatch):
 
     lots = db.scalars(select(Lot)).all()
     manifests = db.scalars(select(IngestManifest)).all()
+    runs = db.scalars(select(IngestRun).order_by(IngestRun.id)).all()
 
     assert first["upserted_count"] == 1
+    assert first["processed_files"] == 1
+    assert first["failed_files"] == 0
     assert second["upserted_count"] == 0
+    assert second["processed_files"] == 0
+    assert second["failed_files"] == 0
     assert len(lots) == 1
     assert len(manifests) == 1
     assert manifests[0].status == "processed"
+    assert len(runs) == 2
+    assert runs[0].status == "success"
+    assert runs[0].processed_files == 1
+    assert runs[0].failed_files == 0
+    assert runs[1].status == "noop"
 
 
 def test_run_ingest_marks_unknown_schema(monkeypatch):
@@ -109,10 +119,19 @@ def test_run_ingest_marks_unknown_schema(monkeypatch):
 
     result = asyncio.run(run_ingest(db))
     manifests = db.scalars(select(IngestManifest)).all()
+    runs = db.scalars(select(IngestRun)).all()
 
     assert result["upserted_count"] == 0
+    assert result["processed_files"] == 0
+    assert result["failed_files"] == 1
     assert len(manifests) == 1
     assert manifests[0].status == "schema_migration_required"
+    assert manifests[0].error_kind == "schema_migration_required"
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
+    assert runs[0].failed_files == 1
+    assert runs[0].last_error_source_url == file_ref.source_url
+    assert runs[0].error_kind == "schema_migration_required"
 
 
 def test_run_ingest_rejects_torgi_error_envelope(monkeypatch):
@@ -140,11 +159,17 @@ def test_run_ingest_rejects_torgi_error_envelope(monkeypatch):
     runs = db.scalars(select(IngestRun)).all()
 
     assert result["upserted_count"] == 0
+    assert result["processed_files"] == 0
+    assert result["failed_files"] == 1
     assert len(manifests) == 1
     assert manifests[0].status == "failed"
+    assert manifests[0].error_kind == "source_unavailable"
     assert manifests[0].error is not None
     assert len(runs) == 1
     assert runs[0].status == "failed"
+    assert runs[0].failed_files == 1
+    assert runs[0].last_error_source_url == file_ref.source_url
+    assert runs[0].error_kind == "source_unavailable"
 
 
 def test_run_ingest_applies_region_filter_and_detail_enrichment(monkeypatch):

@@ -21,6 +21,13 @@ class LotListItem(BaseModel):
     # From notice: start_price / area; not market valuation. None if price or area missing.
     start_price_per_sotka: float | None = None
     start_price_per_sqm: float | None = None
+    # Internal baseline from loaded auction data; not an external market valuation.
+    baseline_price_per_sotka: float | None = None
+    discount_to_baseline: float | None = None
+    valuation_confidence: str | None = None
+    valuation_baseline_scope: str | None = None
+    valuation_baseline_sample_size: int | None = None
+    valuation_reason: str | None = None
 
 
 class LotListPage(BaseModel):
@@ -64,6 +71,10 @@ class IngestRunView(BaseModel):
     fetched_count: int
     upserted_count: int
     changed_count: int
+    processed_files: int = 0
+    failed_files: int = 0
+    last_error_source_url: str | None = None
+    error_kind: str | None = None
     error_message: str | None
 
 

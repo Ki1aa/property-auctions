@@ -19,18 +19,38 @@ function durationMs(started: string | null, finished: string | null): string {
   return `${min.toFixed(1)} мин`;
 }
 
-function friendlyError(status: string, message: string | null): { text: string; title?: string } {
+const errorKindLabels: Record<string, string> = {
+  source_unavailable: "Источник недоступен",
+  schema_migration_required: "Новая схема",
+  file_processing_error: "Ошибка файла",
+  interrupted: "Прервано",
+};
+
+function shortUrl(value: string | null): string {
+  if (!value) return "—";
+  try {
+    const url = new URL(value);
+    const path = `${url.pathname}${url.search}`;
+    const shortenedPath = path.length > 46 ? `${path.slice(0, 43)}…` : path;
+    return `${url.host}${shortenedPath}`;
+  } catch {
+    return value.length > 56 ? `${value.slice(0, 53)}…` : value;
+  }
+}
+
+function friendlyError(run: IngestRun): { text: string; title?: string } {
+  const message = run.error_message;
   if (!message) return { text: "—" };
   const m = message.trim();
-  if (status === "partial_failed" && m.toLowerCase().startsWith("files processed=")) {
+  if (run.error_kind === "source_unavailable") {
     return {
       text: "Источник временно не отдал часть файлов (срез еще не опубликован/недоступен). Попробуйте позже.",
       title: m,
     };
   }
-  if (status === "failed" && m.toLowerCase().includes("torgi opendata:")) {
+  if (run.error_kind === "schema_migration_required") {
     return {
-      text: "Источник Torgi вернул ошибку по данным (файл недоступен или еще не опубликован). Попробуйте позже.",
+      text: "Источник прислал неподдерживаемую структуру данных. Нужна миграция схемы.",
       title: m,
     };
   }
@@ -86,12 +106,16 @@ export function IngestRunsPage() {
               <th className="cell--num">Получено</th>
               <th className="cell--num">Сохранено</th>
               <th className="cell--num">Изменено</th>
+              <th className="cell--num">Файлы</th>
+              <th>Тип сбоя</th>
+              <th className="ingest-runs__url-col">Последний URL ошибки</th>
               <th className="ingest-runs__error-col">Ошибка</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((run) => {
-              const err = friendlyError(run.status, run.error_message);
+              const err = friendlyError(run);
+              const errorKindLabel = run.error_kind ? errorKindLabels[run.error_kind] ?? run.error_kind : "—";
               return (
                 <tr key={run.id}>
                   <td className="cell--num">{run.id}</td>
@@ -104,6 +128,19 @@ export function IngestRunsPage() {
                   <td className="cell--num">{run.fetched_count}</td>
                   <td className="cell--num">{run.upserted_count}</td>
                   <td className="cell--num">{run.changed_count}</td>
+                  <td className="cell--num" title="Обработано / с ошибкой">
+                    {run.processed_files} / {run.failed_files}
+                  </td>
+                  <td>{errorKindLabel}</td>
+                  <td className="cell--mono ingest-runs__url-col" title={run.last_error_source_url ?? undefined}>
+                    {run.last_error_source_url ? (
+                      <a href={run.last_error_source_url} target="_blank" rel="noreferrer">
+                        {shortUrl(run.last_error_source_url)}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="cell--error ingest-runs__error-col" title={err.title ?? undefined}>
                     {err.text}
                   </td>

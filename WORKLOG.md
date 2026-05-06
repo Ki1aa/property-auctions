@@ -6,6 +6,149 @@
 
 ---
 
+## 2026-05-06 - Закрытие технических рисков: карта, CI, lifespan, dev SQLite, MapLibre chunk
+
+**Что сделано:**
+- Исправлен XSS-риск в `TradesMap`: popup больше не собирается через `setHTML`; используется `setDOMContent` и DOM-узлы с `textContent`.
+- GitHub Actions frontend job расширен: после `npx tsc --noEmit` запускаются `npm run test` и `npm run build`.
+- Backend переведён с deprecated FastAPI `@app.on_event("startup")` на lifespan:
+  - startup-логика вынесена в `_startup()`;
+  - при shutdown вызывается остановка APScheduler через `stop_scheduler()`;
+  - pytest больше не показывает warnings про deprecated `on_event`.
+- Выбрана стратегия для dev SQLite:
+  - Alembic остаётся источником истины для production;
+  - `dev_sync_schema.py` добавляет новые колонки и недостающие индексы;
+  - отсутствующие FK в существующей SQLite-таблице выводятся как warning, потому что SQLite требует rebuild/fresh DB.
+- Запущен `python scripts/dev_sync_schema.py`: созданы недостающие индексы `ix_ingest_manifest_error_kind`, `ix_ingest_runs_error_kind`, `ix_lots_is_izhs_candidate`, `ix_lots_opendata_notice_id`, `ix_lots_cadastral_number`; подтвержден warning про FK `lots.opendata_notice_id`.
+- MapLibre разгружен из основного bundle:
+  - `MapPage` лениво загружается через `React.lazy`;
+  - `TradesMap` лениво загружается на странице карты и в карточке лота;
+  - Vite build теперь даёт основной `index` около 220 KB, а MapLibre остаётся отдельным async chunk.
+- Обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+**Затронутые файлы:**
+- .github/workflows/ci.yml
+- backend/app/main.py
+- backend/app/scheduler.py
+- backend/scripts/dev_sync_schema.py
+- frontend/src/App.tsx
+- frontend/src/components/TradesMap.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/pages/MapPage.tsx
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python scripts/dev_sync_schema.py` в `backend/`: прошло, индексы созданы, FK-warning ожидаемый.
+- `python -m pytest` в `backend/`: 48 passed, без FastAPI deprecation warnings.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 2 passed.
+- `npm.cmd run build` в `frontend/`: прошло; предупреждение о крупном chunk осталось только для лениво загружаемого `TradesMap`/MapLibre.
+
+**Известные проблемы / TODO:**
+- `dev_sync_schema.py` не rebuild'ит SQLite-таблицы для добавления FK; при необходимости строгой локальной схемы проще создать fresh DB или использовать Alembic/fresh migration path.
+- MapLibre всё равно остаётся тяжёлой зависимостью, но теперь не блокирует основной bundle.
+- В CI всё ещё нет ruff/eslint и backend migration smoke-test.
+
+**Следующее:**
+- Продолжить demo-MVP: добавить на Dashboard метрики качества данных по целевым регионам и объяснение ограничений shortlist.
+
+---
+
+## 2026-05-06 - Demo-MVP: baseline-оценка и shortlist интересных лотов
+
+**Что сделано:**
+- Добавлена внутренняя baseline-оценка без внешних маркетплейсов:
+  - медиана `start_price_per_sotka` считается на лету по каскаду `region+category -> region -> category -> global`;
+  - для каждого лота API возвращает `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`, `valuation_baseline_scope`, `valuation_baseline_sample_size`, `valuation_reason`;
+  - положительный `discount_to_baseline` означает, что стартовая цена за сотку ниже внутреннего baseline.
+- Добавлена сортировка `/api/lots?sort=discount_to_baseline_desc`.
+- CSV export `/api/export/lots.csv` дополнен baseline-колонками.
+- Страница `/lots` показывает baseline, дисконт и уверенность оценки; сортировка получила пункт «По дисконту к baseline».
+- Карточка `/lots/:id` показывает baseline-блок и основание расчёта.
+- Dashboard получил shortlist «Потенциально интересные ИЖС-кандидаты» по дисконту к baseline.
+- Обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+**Затронутые файлы:**
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/tests/test_api.py
+- frontend/src/types.ts
+- frontend/src/components/LotsTable.tsx
+- frontend/src/pages/LotsPage.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/pages/DashboardPage.tsx
+- frontend/src/styles.css
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 48 passed, 2 warnings про deprecated FastAPI `on_event`.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 2 passed.
+- `npm.cmd run build` в `frontend/`: прошло, есть ожидаемое предупреждение о крупном chunk из-за maplibre.
+
+**Известные проблемы / TODO:**
+- Это baseline по собственной базе торгов, а не рыночная оценка по Циан/Авито.
+- В целевых регионах `72/86/89` пока мало ИЖС-кандидатов с одновременно заполненными стартовой ценой и площадью; для Тюменской области (`72`) сейчас нет ИЖС-кандидатов, по которым можно посчитать дисконт.
+- Для рабочего бизнес-скоринга всё ещё нужны НСПД/геометрия и внешние рыночные аналоги.
+
+**Следующее:**
+- Для demo-MVP добавить более понятные метрики качества данных на Dashboard: целевые регионы, ИЖС-кандидаты, доля с кадастром/площадью/ценой, чтобы руководству было видно не только shortlist, но и ограничения текущих данных.
+
+---
+
+## 2026-05-06 - Безопасный старт и наблюдаемость ingest
+
+**Что сделано:**
+- Выполнен безопасный старт: `git status` показывал изменённые файлы, но `git diff --numstat` / `git diff --raw` не показали содержательных изменений; причина — предупреждения LF -> CRLF при `core.autocrlf=true`.
+- Добавлена наблюдаемость ingest на уровне БД/API/UI:
+  - `IngestRun`: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`;
+  - `IngestManifest`: `error_kind`;
+  - `run_ingest()` сохраняет количество обработанных/упавших файлов, последний URL ошибки и классифицирует `source_unavailable`, `schema_migration_required`, `file_processing_error`;
+  - stale `running` ingest при старте помечается `error_kind=interrupted`.
+- Добавлена Alembic-ревизия `20260506_06_add_ingest_observability.py`.
+- Локальная SQLite-схема синхронизирована через `python scripts/dev_sync_schema.py`.
+- `/api/ingest-runs` возвращает новые диагностические поля.
+- Страница `/ingest` показывает счётчик файлов, тип сбоя и последний URL ошибки.
+- Обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+**Затронутые файлы:**
+- backend/app/models.py
+- backend/app/services/ingest/service.py
+- backend/app/schemas.py
+- backend/app/main.py
+- backend/alembic/versions/20260506_06_add_ingest_observability.py
+- backend/tests/test_api.py
+- backend/tests/test_ingest_service.py
+- frontend/src/types.ts
+- frontend/src/pages/IngestRunsPage.tsx
+- frontend/src/styles.css
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python scripts/dev_sync_schema.py` в `backend/`: добавлены новые колонки в локальную SQLite.
+- `python -m pytest` в `backend/`: 47 passed, 2 warnings про deprecated FastAPI `on_event`.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 2 passed.
+- `npm.cmd run build` в `frontend/`: прошло, есть ожидаемое предупреждение о крупном chunk из-за maplibre.
+
+**Известные проблемы / TODO:**
+- Live-доступ к `torgi.gov.ru` из текущей сети ранее падал на timeout, поэтому live-верификация parser coverage остаётся задачей для среды с доступом к РФ-ресурсам.
+- Исторический разрыв `Lot` -> `OpenDataNotice` сохраняется для части старых записей; предыдущий dry-run новых совпадений не нашёл.
+
+**Следующее:**
+- Продолжить по плану локально: baseline-оценка по собственной базе торгов (`baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`) без ожидания Циан/НСПД.
+
+---
+
 ## 2026-05-06 - Проверка запуска проекта, фикс падения DashboardPage
 
 **Что сделано:**

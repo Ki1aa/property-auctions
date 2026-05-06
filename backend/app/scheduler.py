@@ -26,3 +26,8 @@ def start_scheduler() -> None:
         return
     scheduler.add_job(scheduled_ingest, "interval", minutes=settings.ingest_interval_minutes, id="daily_ingest")
     scheduler.start()
+
+
+def stop_scheduler() -> None:
+    if scheduler.running:
+        scheduler.shutdown(wait=False)

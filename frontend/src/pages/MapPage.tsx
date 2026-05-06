@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { fetchMapPoints } from "../api";
-import { TradesMap } from "../components/TradesMap";
 import { MapPoint } from "../types";
+
+const TradesMap = lazy(() =>
+  import("../components/TradesMap").then((module) => ({ default: module.TradesMap }))
+);
 
 export function MapPage() {
   const [points, setPoints] = useState<MapPoint[]>([]);
@@ -37,7 +40,9 @@ export function MapPage() {
       {!isLoading && points.length === 0 ? (
         <p className="empty">У лотов пока нет координат.</p>
       ) : (
-        <TradesMap points={points} height="calc(100vh - 220px)" />
+        <Suspense fallback={<p className="loading">Загрузка карты…</p>}>
+          <TradesMap points={points} height="calc(100vh - 220px)" />
+        </Suspense>
       )}
     </div>
   );

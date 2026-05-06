@@ -10,7 +10,8 @@
 
 - схема создается автоматически при старте backend через `Base.metadata.create_all(...)`;
 - по умолчанию используется `DATABASE_URL=sqlite+pysqlite:///../data/app.db`;
-- миграции Alembic сохраняются в проекте и будут использоваться при переходе к production.
+- миграции Alembic сохраняются в проекте и будут использоваться при переходе к production;
+- для существующей SQLite после изменения моделей запускайте `cd backend && python scripts/dev_sync_schema.py`: скрипт добавляет новые колонки и недостающие индексы; внешние ключи SQLite не умеет добавлять без rebuild таблицы, поэтому скрипт выводит предупреждение.
 
 ## Быстрый старт (dev)
 
@@ -102,11 +103,11 @@ alembic current
 ## Основные эндпоинты
 
 - `GET /health` - проверка доступности.
-- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/category/is_izhs/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения, не рыночная оценка).
-- `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами и `sort`, параметр `max_rows` (по умолчанию 10000, макс. 50000).
+- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/category/is_izhs/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка).
+- `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами, `sort` и baseline-колонками, параметр `max_rows` (по умолчанию 10000, макс. 50000).
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
-- `GET /api/ingest-runs` - история запусков загрузчика.
+- `GET /api/ingest-runs` - история запусков загрузчика с диагностикой файлов: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`.
 - `GET /api/opendata-notices` - страница извещений: JSON `{ items, total, limit, offset }` с фильтрами `document_type/bidd_type_code/reg_num` и пагинацией `limit`/`offset`.
 
 ## Тесты
@@ -115,4 +116,11 @@ alembic current
 
 ```bash
 pytest
+```
+
+В каталоге `frontend`:
+
+```bash
+npm run test
+npm run build
 ```

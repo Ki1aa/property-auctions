@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import Lot, OpenDataNotice, Organizer
+from app.models import IngestRun, Lot, OpenDataNotice, Organizer
 
 
 def _setup_inmemory_app():
@@ -152,6 +152,49 @@ def test_lots_filters_izhs_and_area():
     assert "lot-other" in csv_categories.text
 
 
+def test_lots_return_baseline_valuation_and_discount_sort():
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    for source_id, start_price in [
+        ("lot-cheap", 500_000),
+        ("lot-middle", 1_000_000),
+        ("lot-expensive", 2_000_000),
+    ]:
+        db.add(
+            Lot(
+                source_id=source_id,
+                title=source_id,
+                status="active",
+                region="72",
+                category="ZK",
+                area_sqm=1000.0,
+                start_price=start_price,
+                is_izhs_candidate=True,
+            )
+        )
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    body = client.get("/api/lots", params={"sort": "discount_to_baseline_desc"}).json()
+
+    assert [item["source_id"] for item in body["items"]] == ["lot-cheap", "lot-middle", "lot-expensive"]
+    cheap = body["items"][0]
+    assert cheap["start_price_per_sotka"] == 50_000
+    assert cheap["baseline_price_per_sotka"] == 100_000
+    assert cheap["discount_to_baseline"] == 0.5
+    assert cheap["valuation_confidence"] == "low"
+    assert cheap["valuation_baseline_scope"] == "region_category"
+    assert cheap["valuation_baseline_sample_size"] == 3
+    assert "медианой" in cheap["valuation_reason"]
+
+    csv_r = client.get("/api/export/lots.csv", params={"sort": "discount_to_baseline_desc"})
+    assert csv_r.status_code == 200
+    assert "baseline_price_per_sotka" in csv_r.text.split("\n")[0]
+    assert "discount_to_baseline" in csv_r.text.split("\n")[0]
+
+
 def test_query_limits_reject_non_positive_values():
     _setup_inmemory_app()
     client = TestClient(app)
@@ -167,6 +210,39 @@ def test_query_limits_reject_non_positive_values():
     for path, params in cases:
         response = client.get(path, params=params)
         assert response.status_code == 422
+
+
+def test_ingest_runs_exposes_observability_fields():
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        IngestRun(
+            status="partial_failed",
+            source_url="https://example.com/latest-data.json",
+            fetched_count=120,
+            upserted_count=30,
+            changed_count=4,
+            processed_files=2,
+            failed_files=1,
+            last_error_source_url="https://example.com/broken-data.json",
+            error_kind="source_unavailable",
+            error_message="Источник временно недоступен",
+        )
+    )
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    response = client.get("/api/ingest-runs")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["processed_files"] == 2
+    assert body[0]["failed_files"] == 1
+    assert body[0]["last_error_source_url"] == "https://example.com/broken-data.json"
+    assert body[0]["error_kind"] == "source_unavailable"
 
 
 def test_lot_facets_endpoint():

@@ -83,6 +83,10 @@ class IngestRun(Base):
     fetched_count: Mapped[int] = mapped_column(Integer, default=0)
     upserted_count: Mapped[int] = mapped_column(Integer, default=0)
     changed_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_files: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    failed_files: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error_source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_kind: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -103,6 +107,7 @@ class IngestManifest(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     records_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_kind: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

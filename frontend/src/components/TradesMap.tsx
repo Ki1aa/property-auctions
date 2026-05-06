@@ -11,6 +11,22 @@ type Props = {
 
 const RU_CENTER: [number, number] = [73.0, 61.0];
 
+function createPopupContent(point: MapPoint): HTMLElement {
+  const root = document.createElement("div");
+
+  const title = document.createElement("strong");
+  title.textContent = point.title;
+  root.appendChild(title);
+
+  root.appendChild(document.createElement("br"));
+
+  const status = document.createElement("span");
+  status.textContent = `Статус: ${point.status || "—"}`;
+  root.appendChild(status);
+
+  return root;
+}
+
 export function TradesMap({ points, height = "420px", fitToPoints = true }: Props) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -48,9 +64,7 @@ export function TradesMap({ points, height = "420px", fitToPoints = true }: Prop
     markersRef.current = [];
 
     for (const point of points) {
-      const popup = new maplibregl.Popup({ offset: 20 }).setHTML(
-        `<strong>${point.title}</strong><br/>Статус: ${point.status || "—"}`
-      );
+      const popup = new maplibregl.Popup({ offset: 20 }).setDOMContent(createPopupContent(point));
 
       const marker = new maplibregl.Marker({ color: "#d23f31" })
         .setLngLat([point.longitude, point.latitude])
