@@ -221,6 +221,10 @@ npm run dev
 cd frontend
 npx tsc --noEmit
 
+# Frontend tests
+cd frontend
+npm run test
+
 # Frontend production build
 cd frontend
 npm run build

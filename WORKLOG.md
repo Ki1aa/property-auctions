@@ -6,6 +6,48 @@
 
 ---
 
+## 2026-05-06 - Проверка запуска проекта, фикс падения DashboardPage
+
+**Что сделано:**
+- Подняты dev-сервера:
+  - backend: `python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`;
+  - frontend: `npm run dev` (Vite на `:5173`).
+- Подтвержден `GET /health`: `{\"status\":\"ok\"}`.
+- Найдено и исправлено падение фронта при рендере `DashboardPage`: в dev-окружении `recentNotices` мог стать `undefined`, и `.length` падал. Добавлена defensive-нормализация ответа (поддержка объекта `{ items, total, ... }` и fallback на массив) перед установкой `recentNotices/recentLots`.
+
+**Затронутые файлы:**
+- frontend/src/pages/DashboardPage.tsx
+
+**Проверки:**
+- Ручная проверка запуска: backend отвечает на `/health`, Vite отдаёт SPA.
+
+---
+
+## 2026-05-05 - Добавлен frontend test runner (Vitest) и тесты reset/URL-state
+
+**Что сделано:**
+- Frontend: добавлен test runner на Vitest + jsdom + Testing Library.
+- Добавлены тесты, фиксирующие критичное поведение:
+  - `TradesPage`: reset фильтров действительно отправляет запрос на `/api/opendata-notices` без фильтров и с `offset=0`.
+  - `LotsPage`: applied-state читается из URL; reset очищает query string и перезагружает список с дефолтами (в API дефолтный `sort=updated_at_desc` уходит как часть текущей реализации).
+
+**Затронутые файлы:**
+- frontend/package.json
+- frontend/vite.config.ts
+- frontend/src/test/setup.ts
+- frontend/src/pages/TradesPage.test.tsx
+- frontend/src/pages/LotsPage.test.tsx
+
+**Проверки:**
+- `npm run test` в `frontend/`: 2 passed.
+- `npx tsc --noEmit` в `frontend/`: прошло.
+- `npm run build` в `frontend/`: прошло (есть ожидаемое предупреждение о крупном chunk из-за maplibre).
+
+**Следующее:**
+- При расширении URL-синхронизации на страницу извещений добавить аналогичные тесты для query params (если решим синхронизировать `/notices` с URL).
+
+---
+
 ## 2026-05-05 - План делегирования для ИИ с доступом к РФ-ресурсам
 
 **Что сделано:**

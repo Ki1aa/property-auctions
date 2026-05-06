@@ -26,6 +26,21 @@ export function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
+    function normalizePageItems<T>(value: unknown): T[] {
+      if (Array.isArray(value)) return value as T[];
+      if (value && typeof value === "object" && Array.isArray((value as { items?: unknown }).items)) {
+        return (value as { items: T[] }).items;
+      }
+      return [];
+    }
+
+    function normalizePageTotal(value: unknown): number | null {
+      if (value && typeof value === "object" && typeof (value as { total?: unknown }).total === "number") {
+        return (value as { total: number }).total;
+      }
+      return null;
+    }
+
     async function load() {
       setIsLoading(true);
       try {
@@ -36,12 +51,12 @@ export function DashboardPage() {
         ]);
         if (cancelled) return;
         setMetrics({
-          lotsCount: lotsPage.total,
-          noticesCount: noticesPage.total,
+          lotsCount: normalizePageTotal(lotsPage) ?? (lotsPage as { total: number }).total,
+          noticesCount: normalizePageTotal(noticesPage) ?? (noticesPage as { total: number }).total,
           lastRun: runs[0] ?? null,
         });
-        setRecentNotices(noticesPage.items);
-        setRecentLots(lotsPage.items);
+        setRecentNotices(normalizePageItems<Notice>(noticesPage));
+        setRecentLots(normalizePageItems<Lot>(lotsPage));
         setError("");
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
