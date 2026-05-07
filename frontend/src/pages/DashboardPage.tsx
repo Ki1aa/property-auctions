@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchIngestRuns, fetchLots, fetchNotices } from "../api";
+import { fetchIngestRuns, fetchLotQualityMetrics, fetchLots, fetchNotices } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
-import { IngestRun, Lot, Notice } from "../types";
+import { IngestRun, Lot, LotQualityMetrics, Notice } from "../types";
 
 type Metrics = {
   lotsCount: number | null;
   noticesCount: number | null;
   lastRun: IngestRun | null;
+  quality: LotQualityMetrics | null;
 };
 
-const initialMetrics: Metrics = { lotsCount: null, noticesCount: null, lastRun: null };
+const initialMetrics: Metrics = { lotsCount: null, noticesCount: null, lastRun: null, quality: null };
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -25,6 +26,25 @@ function formatPrice(value: number | null): string {
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined) return "—";
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatShare(value: number, total: number): string {
+  if (total <= 0) return "—";
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function qualityItems(quality: LotQualityMetrics | null) {
+  if (!quality) return [];
+  return [
+    ["ИЖС-кандидаты", quality.izhs_candidates],
+    ["Есть муниципалитет", quality.with_municipality],
+    ["Есть кадастр", quality.with_cadastral],
+    ["Есть площадь", quality.with_area],
+    ["Есть стартовая цена", quality.with_start_price],
+    ["Можно считать ₽/сотка", quality.with_price_per_sotka],
+    ["Есть baseline", quality.with_baseline],
+    ["Положительный дисконт", quality.with_positive_discount],
+  ] as const;
 }
 
 export function DashboardPage() {
@@ -55,17 +75,27 @@ export function DashboardPage() {
     async function load() {
       setIsLoading(true);
       try {
-        const [lotsPage, noticesPage, runs, opportunitiesPage] = await Promise.all([
+        const [lotsPage, noticesPage, runs, quality, opportunitiesPage] = await Promise.all([
           fetchLots({ limit: 5, offset: 0 }),
           fetchNotices({ limit: 5, offset: 0 }),
           fetchIngestRuns(1),
-          fetchLots({ limit: 10, offset: 0, isIzhs: true, sort: "discount_to_baseline_desc" }),
+          fetchLotQualityMetrics("72"),
+          fetchLots({
+            limit: 10,
+            offset: 0,
+            region: "72",
+            isIzhs: true,
+            hasPricePerSotka: true,
+            hasPositiveDiscount: true,
+            sort: "discount_to_baseline_desc",
+          }),
         ]);
         if (cancelled) return;
         setMetrics({
           lotsCount: normalizePageTotal(lotsPage) ?? (lotsPage as { total: number }).total,
           noticesCount: normalizePageTotal(noticesPage) ?? (noticesPage as { total: number }).total,
           lastRun: runs[0] ?? null,
+          quality,
         });
         setRecentNotices(normalizePageItems<Notice>(noticesPage));
         setRecentLots(normalizePageItems<Lot>(lotsPage));
@@ -112,6 +142,35 @@ export function DashboardPage() {
           <span className="metric__sub">{metrics.lastRun ? formatDate(metrics.lastRun.finished_at ?? metrics.lastRun.started_at) : ""}</span>
           <Link className="metric__link" to="/ingest">История загрузок →</Link>
         </div>
+      </section>
+
+      <section className="section">
+        <div className="section__header">
+          <h2>Качество данных по Тюменской области</h2>
+          <Link to="/lots?region=72" className="section__more">Лоты региона →</Link>
+        </div>
+        {!metrics.quality && !isLoading ? (
+          <p className="empty">Метрики качества пока недоступны. Проверьте, что backend запущен и БД создана.</p>
+        ) : (
+          <div className="quality-grid">
+            {qualityItems(metrics.quality).map(([label, value]) => (
+              <div className="quality-tile" key={label}>
+                <div className="quality-tile__top">
+                  <span>{label}</span>
+                  <strong>{isLoading ? "…" : value}</strong>
+                </div>
+                <div className="quality-tile__bar" aria-hidden="true">
+                  <span
+                    style={{
+                      width: metrics.quality ? `${Math.min(100, Math.round((value / Math.max(1, metrics.quality.total)) * 100))}%` : "0%",
+                    }}
+                  />
+                </div>
+                <small>{metrics.quality ? formatShare(value, metrics.quality.total) : "—"} от {metrics.quality?.total ?? "—"}</small>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="section">

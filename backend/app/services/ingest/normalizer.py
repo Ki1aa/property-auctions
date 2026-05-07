@@ -33,7 +33,7 @@ def normalize_lot(item: dict[str, Any]) -> dict[str, Any]:
             "source_id": reg_num or str(_pick(item, "href") or ""),
             "title": title,
             "status": _pick(item, "documentType"),
-            "region": _pick(item, "subjectRFCode", "subjectRightHolderCode"),
+            "region": _pick(item, "subjectEstateCode"),
             "category": _pick(item, "biddTypeCode", "subjectEstateCode"),
             "start_price": None,
             "current_price": None,

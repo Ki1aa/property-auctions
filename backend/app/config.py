@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     ingest_retry_count: int = 3
 
     # Land plot focus (Tyumen + IZHS).
-    target_region_codes: str = ""
-    izhs_keywords: str = "ИЖС,индивидуальное жилищное строительство,для индивидуального жилого,2.1"
+    target_region_codes: str = "72"
+    izhs_keywords: str = "ИЖС,индивидуальное жилищное строительство,для индивидуального жилого"
     ingest_fetch_notice_details: bool = True
     ingest_detail_max_per_run: int = 200
 

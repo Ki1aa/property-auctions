@@ -38,6 +38,19 @@ function confidenceLabel(value: string | null): string {
   return "—";
 }
 
+function izhsReason(lot: LotDetail): string {
+  if (lot.is_izhs_candidate && lot.permitted_use_codes) {
+    return `Да, по коду ВРИ: ${lot.permitted_use_codes}.`;
+  }
+  if (lot.is_izhs_candidate) {
+    return "Да, по текстовому fallback из извещения.";
+  }
+  if (lot.permitted_use_codes) {
+    return `Нет, коды ВРИ не входят в ИЖС-whitelist: ${lot.permitted_use_codes}.`;
+  }
+  return "Нет, код ВРИ не найден в извещении.";
+}
+
 function pkkLink(cadastral: string | null): string | null {
   if (!cadastral) return null;
   return `https://pkk.rosreestr.ru/#/search/${encodeURIComponent(cadastral)}/?text=${encodeURIComponent(cadastral)}`;
@@ -109,6 +122,8 @@ export function LotDetailPage() {
 
       <section className="card">
         <div className="card__row"><span className="card__label">Регион</span><span>{lot.region || "—"}</span></div>
+        <div className="card__row"><span className="card__label">Муниципалитет</span><span>{lot.municipality || "—"}</span></div>
+        <div className="card__row"><span className="card__label">Населённый пункт</span><span>{lot.settlement || "—"}</span></div>
         <div className="card__row"><span className="card__label">Категория</span><span>{lot.category || "—"}</span></div>
         <div className="card__row"><span className="card__label">Стартовая цена</span><span>{formatPrice(lot.start_price)}</span></div>
         <div className="card__row"><span className="card__label">Текущая цена</span><span>{formatPrice(lot.current_price)}</span></div>
@@ -173,6 +188,8 @@ export function LotDetailPage() {
             <div className="card__row"><span className="card__label">Площадь</span><span>{formatArea(lot.area_sqm)}</span></div>
             <div className="card__row"><span className="card__label">Категория земель</span><span>{lot.land_category || "—"}</span></div>
             <div className="card__row"><span className="card__label">ВРИ (вид разрешённого использования)</span><span>{lot.permitted_use || "—"}</span></div>
+            <div className="card__row"><span className="card__label">Коды ВРИ</span><span>{lot.permitted_use_codes || "—"}</span></div>
+            <div className="card__row"><span className="card__label">ИЖС-кандидат</span><span>{izhsReason(lot)}</span></div>
             <div className="card__row"><span className="card__label">Адрес</span><span>{lot.address || "—"}</span></div>
             {lot.cadastral_number && (
               <div className="card__row">

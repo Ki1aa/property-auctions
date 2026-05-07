@@ -68,6 +68,7 @@ def test_run_ingest_writes_manifest_and_is_idempotent(monkeypatch):
     monkeypatch.setattr("app.services.ingest.service.fetch_json_payload", fake_fetch_json)
     monkeypatch.setattr("app.services.ingest.service.normalize_lot", fake_normalize)
     monkeypatch.setattr("app.services.ingest.service.notify_lot_event", fake_notify)
+    monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "")
 
     first = asyncio.run(run_ingest(db))
     second = asyncio.run(run_ingest(db))
@@ -403,3 +404,92 @@ def test_run_ingest_links_lot_to_opendata_notice(monkeypatch):
     asyncio.run(run_ingest(db_again))
     assert len(db_again.scalars(select(OpenDataNotice)).all()) == 1
     assert len(db_again.scalars(select(Lot)).all()) == 1
+
+
+def test_run_ingest_does_not_create_lot_from_clarifications(monkeypatch):
+    db = _db_session()
+    file_ref = DiscoveredDatasetFile(
+        source_url="https://example.com/data-20260506T0000-20260507T0000-structure-20240401.json",
+        structure_url="https://example.com/structure-20240401.json",
+        data_from=datetime(2026, 5, 6, tzinfo=timezone.utc),
+        data_to=datetime(2026, 5, 7, tzinfo=timezone.utc),
+        schema_version="20240401",
+        source_kind="registry",
+    )
+    opendata_item = {
+        "regNum": "72000000000000000456",
+        "documentType": "clarifications",
+        "publishDate": "2026-05-07T10:00:00Z",
+        "biddTypeCode": "ZK",
+        "subjectEstateCode": "72",
+        "subjectRightHolderCode": "72",
+        "rightHolderCode": "RH-1",
+        "bidderOrgCode": "BO-1",
+        "href": "https://example.com/docs/clarifications_72000000000000000456_abc.json",
+    }
+
+    async def fake_discovery_plan(*, mode: str, last_processed_to):
+        return DiscoveryPlan(files=[file_ref], source_kind="registry", dataset_id="7710568760-notice")
+
+    async def fake_fetch_with_meta(url: str):
+        return {"listObjects": [opendata_item]}, "f" * 64
+
+    async def fake_fetch_json(url: str):
+        return {"fields": []}
+
+    monkeypatch.setattr("app.services.ingest.service.build_discovery_plan", fake_discovery_plan)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload_with_meta", fake_fetch_with_meta)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload", fake_fetch_json)
+    monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "72")
+
+    result = asyncio.run(run_ingest(db))
+
+    assert result["upserted_count"] == 0
+    assert len(db.scalars(select(OpenDataNotice)).all()) == 1
+    assert len(db.scalars(select(Lot)).all()) == 0
+
+
+def test_run_ingest_applies_cancel_event_to_existing_lot(monkeypatch):
+    db = _db_session()
+    db.add(Lot(source_id="72000000000000000789", title="Existing lot", status="PUBLISHED"))
+    db.commit()
+    file_ref = DiscoveredDatasetFile(
+        source_url="https://example.com/data-20260506T0000-20260507T0000-structure-20240401.json",
+        structure_url="https://example.com/structure-20240401.json",
+        data_from=datetime(2026, 5, 6, tzinfo=timezone.utc),
+        data_to=datetime(2026, 5, 7, tzinfo=timezone.utc),
+        schema_version="20240401",
+        source_kind="registry",
+    )
+    opendata_item = {
+        "regNum": "72000000000000000789",
+        "documentType": "noticeCancel",
+        "publishDate": "2026-05-07T10:00:00Z",
+        "biddTypeCode": "ZK",
+        "subjectEstateCode": "72",
+        "subjectRightHolderCode": "72",
+        "rightHolderCode": "RH-1",
+        "bidderOrgCode": "BO-1",
+        "href": "https://example.com/docs/noticeCancel_72000000000000000789_abc.json",
+    }
+
+    async def fake_discovery_plan(*, mode: str, last_processed_to):
+        return DiscoveryPlan(files=[file_ref], source_kind="registry", dataset_id="7710568760-notice")
+
+    async def fake_fetch_with_meta(url: str):
+        return {"listObjects": [opendata_item]}, "g" * 64
+
+    async def fake_fetch_json(url: str):
+        return {"fields": []}
+
+    monkeypatch.setattr("app.services.ingest.service.build_discovery_plan", fake_discovery_plan)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload_with_meta", fake_fetch_with_meta)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload", fake_fetch_json)
+    monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "72")
+
+    result = asyncio.run(run_ingest(db))
+    saved = db.scalars(select(Lot)).one()
+
+    assert result["upserted_count"] == 0
+    assert result["changed_count"] == 1
+    assert saved.status == "CANCELED"

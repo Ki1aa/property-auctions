@@ -18,6 +18,7 @@ from app.schemas import (
     LotFacets,
     LotListItem,
     LotListPage,
+    LotQualityMetrics,
     MapPoint,
     OpenDataNoticeFacets,
     OpenDataNoticeListItem,
@@ -191,6 +192,10 @@ def _lot_valuation(lot: Lot, index: dict[str, dict[Any, BaselineStats] | Baselin
     )
 
 
+def _has_positive_discount(valuation: LotValuation) -> bool:
+    return valuation.discount_to_baseline is not None and valuation.discount_to_baseline > 0
+
+
 def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListItem:
     ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
     valuation = valuation or LotValuation()
@@ -207,6 +212,8 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         end_date=lot.end_date,
         cadastral_number=lot.cadastral_number,
         area_sqm=lot.area_sqm,
+        municipality=lot.municipality,
+        settlement=lot.settlement,
         is_izhs_candidate=bool(lot.is_izhs_candidate),
         start_price_per_sotka=ps,
         start_price_per_sqm=pm,
@@ -222,18 +229,23 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
 def _lot_filters(
     region: str | None,
     status: str | None,
+    municipality: str | None,
     category: list[str] | None,
     is_izhs: bool | None,
     min_area: float | None,
     max_area: float | None,
     max_start_price: float | None,
     cadastral_number: str | None,
+    has_cadastral: bool | None = None,
+    has_price_per_sotka: bool | None = None,
 ) -> list:
     filters: list = []
     if region:
         filters.append(Lot.region == region)
     if status:
         filters.append(Lot.status == status)
+    if municipality:
+        filters.append(Lot.municipality == municipality)
     categories = _normalize_str_list(category)
     if categories:
         filters.append(Lot.category.in_(categories))
@@ -247,6 +259,14 @@ def _lot_filters(
         filters.append(Lot.start_price <= max_start_price)
     if cadastral_number:
         filters.append(Lot.cadastral_number.ilike(f"%{cadastral_number}%"))
+    if has_cadastral is True:
+        filters.append(and_(Lot.cadastral_number.is_not(None), Lot.cadastral_number != ""))
+    elif has_cadastral is False:
+        filters.append((Lot.cadastral_number.is_(None)) | (Lot.cadastral_number == ""))
+    if has_price_per_sotka is True:
+        filters.append(and_(Lot.start_price.is_not(None), Lot.area_sqm.is_not(None), Lot.area_sqm > 0))
+    elif has_price_per_sotka is False:
+        filters.append((Lot.start_price.is_(None)) | (Lot.area_sqm.is_(None)) | (Lot.area_sqm <= 0))
     return filters
 
 
@@ -279,27 +299,48 @@ def _lots_select_ordered(sort: LotsSort):
 def list_lots(
     region: str | None = None,
     status: str | None = None,
+    municipality: str | None = None,
     category: list[str] | None = Query(default=None),
     is_izhs: bool | None = None,
     min_area: float | None = None,
     max_area: float | None = None,
     max_start_price: float | None = None,
     cadastral_number: str | None = None,
+    has_cadastral: bool | None = None,
+    has_price_per_sotka: bool | None = None,
+    has_positive_discount: bool | None = None,
     sort: LotsSort = "updated_at_desc",
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    filters = _lot_filters(region, status, category, is_izhs, min_area, max_area, max_start_price, cadastral_number)
-    total = _lots_count(db, filters)
+    filters = _lot_filters(
+        region,
+        status,
+        municipality,
+        category,
+        is_izhs,
+        min_area,
+        max_area,
+        max_start_price,
+        cadastral_number,
+        has_cadastral,
+        has_price_per_sotka,
+    )
     baseline_index = _load_baseline_index(db)
 
-    if sort == "discount_to_baseline_desc":
+    if sort == "discount_to_baseline_desc" or has_positive_discount is not None:
         stmt = select(Lot)
         if filters:
             stmt = stmt.where(and_(*filters))
         all_rows = db.scalars(stmt).all()
         valuations = {row.id: _lot_valuation(row, baseline_index) for row in all_rows}
+        if has_positive_discount is not None:
+            all_rows = [
+                row
+                for row in all_rows
+                if _has_positive_discount(valuations[row.id]) is has_positive_discount
+            ]
         sorted_rows = sorted(
             all_rows,
             key=lambda row: (
@@ -313,11 +354,12 @@ def list_lots(
         rows = sorted_rows[offset : offset + limit]
         return LotListPage(
             items=[_lot_list_item(row, valuations[row.id]) for row in rows],
-            total=total,
+            total=len(sorted_rows),
             limit=limit,
             offset=offset,
         )
 
+    total = _lots_count(db, filters)
     stmt = _lots_select_ordered(sort)
     if filters:
         stmt = stmt.where(and_(*filters))
@@ -336,25 +378,47 @@ def list_lots(
 def export_lots_csv(
     region: str | None = None,
     status: str | None = None,
+    municipality: str | None = None,
     category: list[str] | None = Query(default=None),
     is_izhs: bool | None = None,
     min_area: float | None = None,
     max_area: float | None = None,
     max_start_price: float | None = None,
     cadastral_number: str | None = None,
+    has_cadastral: bool | None = None,
+    has_price_per_sotka: bool | None = None,
+    has_positive_discount: bool | None = None,
     sort: LotsSort = "updated_at_desc",
     max_rows: int = Query(default=10_000, ge=1, le=50_000),
     db: Session = Depends(get_db),
 ):
-    filters = _lot_filters(region, status, category, is_izhs, min_area, max_area, max_start_price, cadastral_number)
+    filters = _lot_filters(
+        region,
+        status,
+        municipality,
+        category,
+        is_izhs,
+        min_area,
+        max_area,
+        max_start_price,
+        cadastral_number,
+        has_cadastral,
+        has_price_per_sotka,
+    )
     baseline_index = _load_baseline_index(db)
 
-    if sort == "discount_to_baseline_desc":
+    if sort == "discount_to_baseline_desc" or has_positive_discount is not None:
         stmt = select(Lot)
         if filters:
             stmt = stmt.where(and_(*filters))
         rows = db.scalars(stmt).all()
         valuations = {row.id: _lot_valuation(row, baseline_index) for row in rows}
+        if has_positive_discount is not None:
+            rows = [
+                row
+                for row in rows
+                if _has_positive_discount(valuations[row.id]) is has_positive_discount
+            ]
         rows = sorted(
             rows,
             key=lambda row: (
@@ -384,6 +448,8 @@ def export_lots_csv(
             "status",
             "region",
             "category",
+            "municipality",
+            "settlement",
             "start_price",
             "current_price",
             "area_sqm",
@@ -412,6 +478,8 @@ def export_lots_csv(
                 lot.status or "",
                 lot.region or "",
                 lot.category or "",
+                lot.municipality or "",
+                lot.settlement or "",
                 lot.start_price if lot.start_price is not None else "",
                 lot.current_price if lot.current_price is not None else "",
                 lot.area_sqm if lot.area_sqm is not None else "",
@@ -455,6 +523,41 @@ def lot_facets(db: Session = Depends(get_db)):
         category=distinct_strings(Lot.category),
         status=distinct_strings(Lot.status),
         region=distinct_strings(Lot.region),
+        municipality=distinct_strings(Lot.municipality),
+    )
+
+
+@router.get("/lots/quality", response_model=LotQualityMetrics)
+def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)):
+    filters = [Lot.region == region] if region else []
+
+    def count_where(*conditions) -> int:
+        q = select(func.count(Lot.id))
+        all_filters = filters + list(conditions)
+        if all_filters:
+            q = q.where(and_(*all_filters))
+        return int(db.scalar(q) or 0)
+
+    stmt = select(Lot)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    rows = db.scalars(stmt).all()
+    baseline_index = _load_baseline_index(db)
+    valuations = [_lot_valuation(row, baseline_index) for row in rows]
+
+    return LotQualityMetrics(
+        region=region,
+        total=len(rows),
+        izhs_candidates=count_where(Lot.is_izhs_candidate.is_(True)),
+        with_municipality=count_where(and_(Lot.municipality.is_not(None), Lot.municipality != "")),
+        with_cadastral=count_where(and_(Lot.cadastral_number.is_not(None), Lot.cadastral_number != "")),
+        with_area=count_where(and_(Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
+        with_start_price=count_where(Lot.start_price.is_not(None)),
+        with_price_per_sotka=count_where(and_(Lot.start_price.is_not(None), Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
+        with_baseline=sum(1 for valuation in valuations if valuation.baseline_price_per_sotka is not None),
+        with_positive_discount=sum(
+            1 for valuation in valuations if _has_positive_discount(valuation)
+        ),
     )
 
 
@@ -495,6 +598,8 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         organizer_inn=organizer.inn if organizer else None,
         cadastral_number=lot.cadastral_number,
         area_sqm=lot.area_sqm,
+        municipality=lot.municipality,
+        settlement=lot.settlement,
         is_izhs_candidate=bool(lot.is_izhs_candidate),
         start_price_per_sotka=ps,
         start_price_per_sqm=pm,
@@ -506,6 +611,7 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         valuation_reason=valuation.valuation_reason,
         land_category=lot.land_category,
         permitted_use=lot.permitted_use,
+        permitted_use_codes=lot.permitted_use_codes,
         address=lot.address,
         notice_detail_url=lot.notice_detail_url,
         opendata_notice_id=lot.opendata_notice_id,

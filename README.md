@@ -48,6 +48,17 @@ npm run dev
 
 Если указан URL карточки, backend автоматически извлекает ссылки на `data-*.json`, выбирает самую актуальную версию и загружает ее.
 
+## Offline demo-данные
+
+Если live-доступ к `torgi.gov.ru` недоступен из-за VPN/маршрутизации, MVP можно наполнить сохранённой выборкой из `data/raw`:
+
+```bash
+cd backend
+python scripts/load_demo_tyumen_data.py --reset
+```
+
+Скрипт не ходит в сеть: он загружает `data/raw/torgi_opendata_tyumen_union.json` и сохранённые detail JSON из `data/raw/torgi_sample_lots_full_20260507`. При `--reset` dev-таблицы очищаются и получается воспроизводимый набор для демонстрации Dashboard/Lots.
+
 ## Discovery chain ingestion
 
 Ingestion использует 3 уровня discovery источника:
@@ -103,8 +114,9 @@ alembic current
 ## Основные эндпоинты
 
 - `GET /health` - проверка доступности.
-- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/category/is_izhs/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка).
+- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка).
 - `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами, `sort` и baseline-колонками, параметр `max_rows` (по умолчанию 10000, макс. 50000).
+- `GET /api/lots/quality?region=72` - метрики качества данных для Dashboard: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline.
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
 - `GET /api/ingest-runs` - история запусков загрузчика с диагностикой файлов: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`.

@@ -47,6 +47,7 @@ export function LotsTable({ lots }: Props) {
           <th>Название</th>
           <th>Статус</th>
           <th>Регион</th>
+          <th>Муниципалитет</th>
           <th>Площадь</th>
           <th>Кадастр</th>
           <th>Текущая цена</th>
@@ -72,6 +73,7 @@ export function LotsTable({ lots }: Props) {
             </td>
             <td><StatusBadge status={lot.status} /></td>
             <td>{lot.region || "—"}</td>
+            <td>{lot.municipality || lot.settlement || "—"}</td>
             <td>{formatArea(lot.area_sqm)}</td>
             <td className="cell--mono">{lot.cadastral_number || "—"}</td>
             <td className="cell--num">{formatPrice(lot.current_price ?? lot.start_price)}</td>

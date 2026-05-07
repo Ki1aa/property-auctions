@@ -4,7 +4,7 @@ This script does NOT touch the network. It walks every Lot, finds the most
 recent LotSnapshot, and re-applies:
 
 - the latest IZHS keyword set (settings.izhs_keywords) via match_izhs(),
-- the cadastral_number regex from detail_parser, in case the parser was
+- the cadastral_number / FIAS fields from detail_parser, in case the parser was
   improved since the lot was last ingested.
 
 The opendata index payload typically does NOT contain rich notice-detail
@@ -71,6 +71,8 @@ def reprocess(*, dry_run: bool, limit: int | None) -> dict[str, Any]:
         "cadastral_filled_now": 0,
         "cadastral_already_set": 0,
         "cadastral_still_missing": 0,
+        "municipality_filled_now": 0,
+        "permitted_use_codes_filled_now": 0,
     }
 
     sample_changes: list[dict[str, Any]] = []
@@ -109,9 +111,28 @@ def reprocess(*, dry_run: bool, limit: int | None) -> dict[str, Any]:
                 else:
                     counts["cadastral_still_missing"] += 1
             else:
+                parsed = parse_notice_detail(payload)
                 counts["cadastral_already_set"] += 1
 
-            changed = (now_izhs != was_izhs) or (new_cadastral and not had_cadastral)
+            new_municipality = parsed.get("municipality")
+            new_settlement = parsed.get("settlement")
+            new_permitted_use_codes_raw = parsed.get("permitted_use_codes")
+            new_permitted_use_codes = (
+                ", ".join(str(code) for code in new_permitted_use_codes_raw if code)
+                if isinstance(new_permitted_use_codes_raw, list)
+                else None
+            )
+            if new_municipality and not lot.municipality:
+                counts["municipality_filled_now"] += 1
+            if new_permitted_use_codes and not lot.permitted_use_codes:
+                counts["permitted_use_codes_filled_now"] += 1
+
+            changed = (
+                (now_izhs != was_izhs)
+                or (new_cadastral and not had_cadastral)
+                or (new_municipality and not lot.municipality)
+                or (new_permitted_use_codes and not lot.permitted_use_codes)
+            )
             if changed:
                 if len(sample_changes) < 25:
                     sample_changes.append(
@@ -123,12 +144,22 @@ def reprocess(*, dry_run: bool, limit: int | None) -> dict[str, Any]:
                             "is_izhs_candidate_after": now_izhs,
                             "cadastral_before": lot.cadastral_number,
                             "cadastral_after": new_cadastral or lot.cadastral_number,
+                            "municipality_before": lot.municipality,
+                            "municipality_after": new_municipality or lot.municipality,
+                            "permitted_use_codes_before": lot.permitted_use_codes,
+                            "permitted_use_codes_after": new_permitted_use_codes or lot.permitted_use_codes,
                         }
                     )
                 if not dry_run:
                     lot.is_izhs_candidate = now_izhs
                     if new_cadastral and not had_cadastral:
                         lot.cadastral_number = new_cadastral
+                    if new_municipality and not lot.municipality:
+                        lot.municipality = new_municipality
+                    if new_settlement and not lot.settlement:
+                        lot.settlement = new_settlement
+                    if new_permitted_use_codes and not lot.permitted_use_codes:
+                        lot.permitted_use_codes = new_permitted_use_codes
 
         if not dry_run:
             db.commit()
@@ -173,6 +204,10 @@ def main() -> None:
     print(
         f"- cadastral: already_set={counts['cadastral_already_set']}, "
         f"filled_now={counts['cadastral_filled_now']}, still_missing={counts['cadastral_still_missing']}"
+    )
+    print(
+        f"- FIAS/codes: municipality_filled_now={counts['municipality_filled_now']}, "
+        f"permitted_use_codes_filled_now={counts['permitted_use_codes_filled_now']}"
     )
     print(f"- output: {output_path}")
 

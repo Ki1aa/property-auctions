@@ -83,6 +83,8 @@ PRICE_FALLBACK_ALIASES = (
     "minPriceVAT",
 )
 
+IZHS_PERMITTED_USE_CODES = frozenset(("2.1", "2.2", "2.3", "13.1", "13.2"))
+
 # Free-text fields searched for area / vri keywords as last resort.
 DESCRIPTION_FIELD_ALIASES = (
     "lotDescription",
@@ -247,6 +249,39 @@ def _find_characteristic_string(payload: Any, codes: tuple[str, ...]) -> str | N
     return None
 
 
+def _characteristic_value_codes(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        code = value.get("code")
+        return [code.strip()] if isinstance(code, str) and code.strip() else []
+    if isinstance(value, list):
+        codes: list[str] = []
+        for item in value:
+            codes.extend(_characteristic_value_codes(item))
+        return codes
+    return []
+
+
+def _find_characteristic_codes(payload: Any, codes: tuple[str, ...]) -> list[str]:
+    code_set = {item.lower() for item in codes}
+    found: list[str] = []
+    for node in _walk(payload):
+        if not isinstance(node, dict):
+            continue
+        characteristics = node.get("characteristics")
+        if not isinstance(characteristics, list):
+            continue
+        for characteristic in characteristics:
+            if not isinstance(characteristic, dict):
+                continue
+            code = characteristic.get("code")
+            if not isinstance(code, str) or code.lower() not in code_set:
+                continue
+            for value_code in _characteristic_value_codes(characteristic.get("characteristicValue")):
+                if value_code not in found:
+                    found.append(value_code)
+    return found
+
+
 def _find_characteristic_number(payload: Any, codes: tuple[str, ...]) -> float | None:
     text = _find_characteristic_string(payload, codes)
     if not text:
@@ -318,8 +353,83 @@ def _find_permitted_use_in_text(payload: Any) -> str | None:
     return None
 
 
+def _find_subject_region_code(payload: Any) -> str | None:
+    for node in _walk(payload):
+        if not isinstance(node, dict):
+            continue
+        subject_rf = node.get("subjectRF")
+        if isinstance(subject_rf, dict):
+            code = subject_rf.get("code")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    return None
+
+
+def _fias_level_code(node: dict[str, Any]) -> int | None:
+    level = node.get("level")
+    if not isinstance(level, dict):
+        return None
+    code = level.get("code")
+    if isinstance(code, int):
+        return code
+    if isinstance(code, str):
+        try:
+            return int(code)
+        except ValueError:
+            return None
+    return None
+
+
+def _find_fias_location(payload: Any) -> tuple[str | None, str | None]:
+    for node in _walk(payload):
+        if not isinstance(node, dict):
+            continue
+        estate_fias = node.get("estateAddressFIAS")
+        if not isinstance(estate_fias, dict):
+            continue
+        address_by_fias = estate_fias.get("addressByFIAS")
+        if not isinstance(address_by_fias, dict):
+            continue
+
+        hierarchy = address_by_fias.get("hierarchyObjects")
+        hierarchy_items = [item for item in hierarchy if isinstance(item, dict)] if isinstance(hierarchy, list) else []
+        leaf_level = _fias_level_code(address_by_fias)
+        leaf_name = address_by_fias.get("name")
+
+        municipality = None
+        settlement = None
+        for item in hierarchy_items:
+            level = _fias_level_code(item)
+            name = item.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if level == 3 and municipality is None:
+                municipality = name.strip()
+            if level in {4, 5, 6}:
+                settlement = name.strip()
+
+        if isinstance(leaf_name, str) and leaf_name.strip():
+            if leaf_level == 3 and municipality is None:
+                municipality = leaf_name.strip()
+            if leaf_level in {4, 5, 6}:
+                settlement = leaf_name.strip()
+
+        if municipality or settlement:
+            return municipality, settlement
+    return None, None
+
+
+def _is_izhs_permitted_use_code(code: str) -> bool:
+    normalized = code.strip()
+    return any(
+        normalized == allowed or normalized.startswith(f"{allowed}.")
+        for allowed in IZHS_PERMITTED_USE_CODES
+    )
+
+
 def parse_notice_detail(payload: Any) -> dict[str, Any]:
     """Extract land-plot fields from a ГИС Торги notice detail JSON tree."""
+    municipality, settlement = _find_fias_location(payload)
     cadastral = _find_cadastral_number(payload)
     if cadastral is None:
         cadastral = _find_characteristic_string(
@@ -355,6 +465,9 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
         )
     if permitted_use is None:
         permitted_use = _find_permitted_use_in_text(payload)
+    permitted_use_codes = _find_characteristic_codes(
+        payload, ("PermittedUse", "permittedUse", "vri", "EstatePermittedUse")
+    )
 
     start_price = _find_first_number(payload, PRICE_ALIASES)
     if start_price is None:
@@ -376,14 +489,29 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
         "area_sqm": area_sqm,
         "land_category": _find_first_string(payload, LAND_CATEGORY_ALIASES),
         "permitted_use": permitted_use,
+        "permitted_use_codes": permitted_use_codes,
+        "subject_region_code": _find_subject_region_code(payload),
         "address": _find_first_string(payload, ADDRESS_ALIASES),
+        "municipality": municipality,
+        "settlement": settlement,
         "lot_name": _find_first_string(payload, NAME_ALIASES),
         "start_price": start_price,
     }
 
 
 def match_izhs(payload: Any, keywords: list[str]) -> bool:
-    """Return True when any IZHS keyword appears in any text of the payload."""
+    """Return True when a notice detail describes an IZHS-like permitted use.
+
+    Real Torgi detail JSON carries a classifier code in
+    characteristics[code=PermittedUse].characteristicValue[].code. Prefer that
+    signal when present; it avoids false positives from incidental text such as
+    references to regulation paragraph "2.1".
+    """
+    permitted_use_codes = _find_characteristic_codes(
+        payload, ("PermittedUse", "permittedUse", "vri", "EstatePermittedUse")
+    )
+    if permitted_use_codes:
+        return any(_is_izhs_permitted_use_code(code) for code in permitted_use_codes)
     if not keywords:
         return False
     haystack = _normalize(json.dumps(payload, ensure_ascii=False))

@@ -42,7 +42,10 @@ class Lot(Base):
     area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
     land_category: Mapped[str | None] = mapped_column(String(256), nullable=True)
     permitted_use: Mapped[str | None] = mapped_column(Text, nullable=True)
+    permitted_use_codes: Mapped[str | None] = mapped_column(String(256), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    municipality: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    settlement: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     notice_detail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_izhs_candidate: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", index=True)
 

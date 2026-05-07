@@ -3,6 +3,7 @@ import {
   LotDetail,
   LotFacets,
   LotListPage,
+  LotQualityMetrics,
   LotsSort,
   MapPoint,
   NoticeListPage,
@@ -44,12 +45,16 @@ async function request<T>(path: string, params?: Record<string, RequestParam | R
 export type FetchLotsParams = {
   region?: string;
   status?: string;
+  municipality?: string;
   category?: string[];
   isIzhs?: boolean;
   minArea?: number;
   maxArea?: number;
   maxStartPrice?: number;
   cadastralNumber?: string;
+  hasCadastral?: boolean;
+  hasPricePerSotka?: boolean;
+  hasPositiveDiscount?: boolean;
   limit?: number;
   offset?: number;
   sort?: LotsSort;
@@ -59,12 +64,18 @@ function lotsQueryRecord(params: FetchLotsParams): Record<string, RequestParam |
   return {
     region: params.region,
     status: params.status,
+    municipality: params.municipality,
     category: params.category,
     is_izhs: params.isIzhs === undefined ? undefined : params.isIzhs ? "true" : "false",
     min_area: params.minArea,
     max_area: params.maxArea,
     max_start_price: params.maxStartPrice,
     cadastral_number: params.cadastralNumber,
+    has_cadastral: params.hasCadastral === undefined ? undefined : params.hasCadastral ? "true" : "false",
+    has_price_per_sotka:
+      params.hasPricePerSotka === undefined ? undefined : params.hasPricePerSotka ? "true" : "false",
+    has_positive_discount:
+      params.hasPositiveDiscount === undefined ? undefined : params.hasPositiveDiscount ? "true" : "false",
     limit: params.limit,
     offset: params.offset,
     sort: params.sort,
@@ -117,6 +128,10 @@ export function fetchLots(params: FetchLotsParams = {}): Promise<LotListPage> {
 
 export function fetchLotFacets(): Promise<LotFacets> {
   return request<LotFacets>("/api/lots/facets");
+}
+
+export function fetchLotQualityMetrics(region = "72"): Promise<LotQualityMetrics> {
+  return request<LotQualityMetrics>("/api/lots/quality", { region });
 }
 
 export function fetchLot(id: number | string): Promise<LotDetail> {

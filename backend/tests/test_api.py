@@ -74,6 +74,7 @@ def test_lots_filters_izhs_and_area():
             title="ИЖС Тюмень",
             status="active",
             region="72",
+            municipality="г.о. город Тюмень",
             category="ZK",
             cadastral_number="72:23:0123456:7",
             area_sqm=1200.0,
@@ -111,6 +112,15 @@ def test_lots_filters_izhs_and_area():
     by_cadastral = client.get("/api/lots", params={"cadastral_number": "72:23"}).json()["items"]
     assert [item["source_id"] for item in by_cadastral] == ["lot-izhs"]
 
+    by_municipality = client.get("/api/lots", params={"municipality": "г.о. город Тюмень"}).json()["items"]
+    assert [item["source_id"] for item in by_municipality] == ["lot-izhs"]
+
+    with_cadastral = client.get("/api/lots", params={"has_cadastral": "true"}).json()["items"]
+    assert {item["source_id"] for item in with_cadastral} == {"lot-izhs", "lot-other"}
+
+    with_price_per_sotka = client.get("/api/lots", params={"has_price_per_sotka": "true"}).json()["items"]
+    assert {item["source_id"] for item in with_price_per_sotka} == {"lot-izhs", "lot-other"}
+
     by_categories = client.get(
         "/api/lots",
         params=[("category", "ZK"), ("category", "178FZ")],
@@ -121,6 +131,7 @@ def test_lots_filters_izhs_and_area():
     assert [item["source_id"] for item in single_cat] == ["lot-izhs"]
 
     izhs_row = next(i for i in only_izhs if i["source_id"] == "lot-izhs")
+    assert izhs_row["municipality"] == "г.о. город Тюмень"
     assert izhs_row["start_price_per_sqm"] is not None
     assert abs(izhs_row["start_price_per_sqm"] - (1_000_000 / 1200.0)) < 0.02
     assert izhs_row["start_price_per_sotka"] is not None
@@ -142,6 +153,7 @@ def test_lots_filters_izhs_and_area():
     assert csv_r.status_code == 200
     assert "lot-izhs" in csv_r.text
     assert "source_url" in csv_r.text.split("\n")[0]
+    assert "municipality" in csv_r.text.split("\n")[0]
 
     csv_categories = client.get(
         "/api/export/lots.csv",
@@ -193,6 +205,18 @@ def test_lots_return_baseline_valuation_and_discount_sort():
     assert csv_r.status_code == 200
     assert "baseline_price_per_sotka" in csv_r.text.split("\n")[0]
     assert "discount_to_baseline" in csv_r.text.split("\n")[0]
+
+    discounted = client.get("/api/lots", params={"has_positive_discount": "true"}).json()
+    assert [item["source_id"] for item in discounted["items"]] == ["lot-cheap"]
+
+    quality = client.get("/api/lots/quality", params={"region": "72"}).json()
+    assert quality["total"] == 3
+    assert quality["izhs_candidates"] == 3
+    assert quality["with_area"] == 3
+    assert quality["with_start_price"] == 3
+    assert quality["with_price_per_sotka"] == 3
+    assert quality["with_baseline"] == 3
+    assert quality["with_positive_discount"] == 1
 
 
 def test_query_limits_reject_non_positive_values():
@@ -277,6 +301,7 @@ def test_lot_facets_endpoint():
     assert set(body["category"]) == {"178FZ", "ZK"}
     assert set(body["status"]) == {"notice", "protocol"}
     assert set(body["region"]) == {"72", "86"}
+    assert body["municipality"] == []
 
 
 def test_opendata_notices_multi_filter_and_facets():

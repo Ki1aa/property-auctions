@@ -12,8 +12,12 @@ const DEFAULT_SORT: LotsSort = "updated_at_desc";
 type LotsQueryState = {
   region: string;
   status: string;
+  municipality: string;
   categories: string[];
   isIzhs: boolean;
+  hasCadastral: boolean;
+  hasPricePerSotka: boolean;
+  hasPositiveDiscount: boolean;
   minArea: string;
   maxArea: string;
   maxStartPrice: string;
@@ -43,8 +47,12 @@ function queryStateFromSearchParams(params: URLSearchParams): LotsQueryState {
   return {
     region: params.get("region") ?? "",
     status: params.get("status") ?? "",
+    municipality: params.get("municipality") ?? "",
     categories: params.getAll("category"),
     isIzhs: params.get("is_izhs") === "true",
+    hasCadastral: params.get("has_cadastral") === "true",
+    hasPricePerSotka: params.get("has_price_per_sotka") === "true",
+    hasPositiveDiscount: params.get("has_positive_discount") === "true",
     minArea: params.get("min_area") ?? "",
     maxArea: params.get("max_area") ?? "",
     maxStartPrice: params.get("max_start_price") ?? "",
@@ -67,8 +75,12 @@ export function LotsPage() {
   const [offset, setOffset] = useState(initialQuery.offset);
   const [region, setRegion] = useState(initialQuery.region);
   const [status, setStatus] = useState(initialQuery.status);
+  const [municipality, setMunicipality] = useState(initialQuery.municipality);
   const [categories, setCategories] = useState<string[]>(initialQuery.categories);
   const [isIzhs, setIsIzhs] = useState(initialQuery.isIzhs);
+  const [hasCadastral, setHasCadastral] = useState(initialQuery.hasCadastral);
+  const [hasPricePerSotka, setHasPricePerSotka] = useState(initialQuery.hasPricePerSotka);
+  const [hasPositiveDiscount, setHasPositiveDiscount] = useState(initialQuery.hasPositiveDiscount);
   const [minArea, setMinArea] = useState(initialQuery.minArea);
   const [maxArea, setMaxArea] = useState(initialQuery.maxArea);
   const [maxStartPrice, setMaxStartPrice] = useState(initialQuery.maxStartPrice);
@@ -92,13 +104,22 @@ export function LotsPage() {
     return Array.from(s).sort();
   }, [facets, categories]);
 
+  const municipalityOptions = useMemo(() => {
+    const s = new Set([...(facets?.municipality ?? []), ...(municipality ? [municipality] : [])]);
+    return Array.from(s).sort();
+  }, [facets, municipality]);
+
   const exportUrl = useMemo(() => {
     const applied = queryStateFromSearchParams(searchParams);
     return buildLotsExportUrl({
       region: applied.region || undefined,
       status: applied.status || undefined,
+      municipality: applied.municipality || undefined,
       category: applied.categories.length ? applied.categories : undefined,
       isIzhs: applied.isIzhs ? true : undefined,
+      hasCadastral: applied.hasCadastral ? true : undefined,
+      hasPricePerSotka: applied.hasPricePerSotka ? true : undefined,
+      hasPositiveDiscount: applied.hasPositiveDiscount ? true : undefined,
       minArea: optionalNumber(applied.minArea),
       maxArea: optionalNumber(applied.maxArea),
       maxStartPrice: optionalNumber(applied.maxStartPrice),
@@ -112,6 +133,8 @@ export function LotsPage() {
     Boolean(facets) && regionOptions.length > 0 && regionOptions.length <= FACET_SINGLE_SELECT_MAX;
   const statusAsSelect =
     Boolean(facets) && statusOptions.length > 0 && statusOptions.length <= FACET_SINGLE_SELECT_MAX;
+  const municipalityAsSelect =
+    Boolean(facets) && municipalityOptions.length > 0 && municipalityOptions.length <= FACET_SINGLE_SELECT_MAX;
 
   async function load(query: LotsQueryState) {
     try {
@@ -120,8 +143,12 @@ export function LotsPage() {
       const page = await fetchLots({
         region: query.region || undefined,
         status: query.status || undefined,
+        municipality: query.municipality || undefined,
         category: query.categories.length ? query.categories : undefined,
         isIzhs: query.isIzhs ? true : undefined,
+        hasCadastral: query.hasCadastral ? true : undefined,
+        hasPricePerSotka: query.hasPricePerSotka ? true : undefined,
+        hasPositiveDiscount: query.hasPositiveDiscount ? true : undefined,
         minArea: optionalNumber(query.minArea),
         maxArea: optionalNumber(query.maxArea),
         maxStartPrice: optionalNumber(query.maxStartPrice),
@@ -142,8 +169,12 @@ export function LotsPage() {
   function syncFormState(query: LotsQueryState) {
     setRegion(query.region);
     setStatus(query.status);
+    setMunicipality(query.municipality);
     setCategories(query.categories);
     setIsIzhs(query.isIzhs);
+    setHasCadastral(query.hasCadastral);
+    setHasPricePerSotka(query.hasPricePerSotka);
+    setHasPositiveDiscount(query.hasPositiveDiscount);
     setMinArea(query.minArea);
     setMaxArea(query.maxArea);
     setMaxStartPrice(query.maxStartPrice);
@@ -156,10 +187,14 @@ export function LotsPage() {
     const next = new URLSearchParams();
     if (region) next.set("region", region);
     if (status) next.set("status", status);
+    if (municipality) next.set("municipality", municipality);
     for (const c of categories) {
       next.append("category", c);
     }
     if (isIzhs) next.set("is_izhs", "true");
+    if (hasCadastral) next.set("has_cadastral", "true");
+    if (hasPricePerSotka) next.set("has_price_per_sotka", "true");
+    if (hasPositiveDiscount) next.set("has_positive_discount", "true");
     if (minArea) next.set("min_area", minArea);
     if (maxArea) next.set("max_area", maxArea);
     if (maxStartPrice) next.set("max_start_price", maxStartPrice);
@@ -243,6 +278,25 @@ export function LotsPage() {
             placeholder="Регион (код, например 72)"
           />
         )}
+        {municipalityAsSelect ? (
+          <label className="filters__field">
+            <span className="filters__facet-label">Муниципалитет</span>
+            <select className="filters__select" value={municipality} onChange={(e) => setMunicipality(e.target.value)}>
+              <option value="">Все</option>
+              {municipalityOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <input
+            value={municipality}
+            onChange={(e) => setMunicipality(e.target.value)}
+            placeholder="Муниципалитет"
+          />
+        )}
         {statusAsSelect ? (
           <label className="filters__field">
             <span className="filters__facet-label">Тип документа</span>
@@ -296,6 +350,28 @@ export function LotsPage() {
           <input type="checkbox" checked={isIzhs} onChange={(e) => setIsIzhs(e.target.checked)} />
           <span>Только ИЖС</span>
         </label>
+        <div className="quick-filters">
+          <label className="checkbox">
+            <input type="checkbox" checked={hasCadastral} onChange={(e) => setHasCadastral(e.target.checked)} />
+            <span>С кадастром</span>
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={hasPricePerSotka}
+              onChange={(e) => setHasPricePerSotka(e.target.checked)}
+            />
+            <span>С ₽/сотка</span>
+          </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={hasPositiveDiscount}
+              onChange={(e) => setHasPositiveDiscount(e.target.checked)}
+            />
+            <span>С дисконтом</span>
+          </label>
+        </div>
         <label className="filters__field">
           <span className="filters__facet-label">Сортировка</span>
           <select

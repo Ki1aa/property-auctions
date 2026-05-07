@@ -6,6 +6,201 @@
 
 ---
 
+## 2026-05-07 - MVP hardening: demo-data, ФИАС, Dashboard quality, frontend resilience
+
+**Цель:** выполнить пункты 1-5 MVP-плана: привести уже существующую функциональность к рабочему состоянию без `mvp_score` и без Telegram-алертов.
+
+**Что сделано:**
+- Разобрано текущее рабочее дерево: содержательные изменения были в backend/doc-части предыдущего шага; несколько frontend/alerts файлов помечены git как modified из-за LF/CRLF без содержательного diff.
+- Добавлен offline demo-loader `backend/scripts/load_demo_tyumen_data.py`:
+  - читает `data/raw/torgi_opendata_tyumen_union.json`;
+  - читает сохранённые detail JSON из `data/raw/torgi_sample_lots_full_20260507`;
+  - не ходит в сеть;
+  - поддерживает `--reset` для воспроизводимой dev-БД.
+- Добавлены поля `Lot.permitted_use_codes`, `Lot.municipality`, `Lot.settlement`.
+- Добавлена Alembic-ревизия `20260507_07_add_lot_municipality_fields.py`.
+- `detail_parser` теперь извлекает ФИАС-муниципалитет/населённый пункт из `estateAddressFIAS.addressByFIAS.hierarchyObjects[]`.
+- Ingest сохраняет `permitted_use_codes`, `municipality`, `settlement`; `reprocess_lots_offline.py` умеет добирать эти поля из сохранённых snapshot payload.
+- API расширен:
+  - `/api/lots` и CSV поддерживают `municipality`, `has_cadastral`, `has_price_per_sotka`, `has_positive_discount`;
+  - `/api/lots/facets` возвращает `municipality`;
+  - добавлен `/api/lots/quality?region=72` для Dashboard-метрик качества данных.
+- Dashboard получил блок качества данных по Тюменской области: ИЖС-кандидаты, муниципалитет, кадастр, площадь, стартовая цена, ₽/сотка, baseline, положительный дисконт.
+- `/lots` получил быстрые фильтры качества и фильтр по муниципалитету.
+- Карточка лота показывает муниципалитет, населённый пункт, коды ВРИ и объяснение, почему лот считается/не считается ИЖС-кандидатом.
+- Добавлен базовый frontend ErrorBoundary.
+- Обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+**Затронутые файлы:**
+- .env.example
+- backend/app/config.py
+- backend/app/models.py
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/app/services/ingest/normalizer.py
+- backend/app/services/ingest/detail_parser.py
+- backend/app/services/ingest/service.py
+- backend/alembic/versions/20260507_07_add_lot_municipality_fields.py
+- backend/scripts/load_demo_tyumen_data.py
+- backend/scripts/reprocess_lots_offline.py
+- backend/tests/test_api.py
+- backend/tests/test_detail_parser.py
+- backend/tests/test_ingest_service.py
+- backend/tests/test_normalizer_notices.py
+- frontend/src/api.ts
+- frontend/src/types.ts
+- frontend/src/main.tsx
+- frontend/src/components/ErrorBoundary.tsx
+- frontend/src/components/LotsTable.tsx
+- frontend/src/pages/DashboardPage.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/pages/LotsPage.tsx
+- frontend/src/styles.css
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 53 passed.
+- `python scripts/dev_sync_schema.py` в `backend/`: добавлены `permitted_use_codes`, `municipality`, `settlement`, индексы `ix_lots_municipality`, `ix_lots_settlement`; FK-warning ожидаемый для существующей SQLite.
+- `DATABASE_URL=sqlite+pysqlite:///../data/demo_loader_check.db python scripts/load_demo_tyumen_data.py --reset`: прошло, 77 `OpenDataNotice`, 15 Lot, 8 ИЖС-кандидатов, 13 лотов с ₽/сотка; временная БД удалена.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 2 passed.
+- `npm.cmd run build` в `frontend/`: прошло; MapLibre остаётся крупным lazy chunk.
+- `git diff --check`: без whitespace-ошибок, только обычные предупреждения LF -> CRLF.
+
+**Известные проблемы / TODO:**
+- Реальный manual smoke-test в браузере на demo-БД ещё не пройден.
+- НСПД-клиент и модель кадастрового обогащения ещё не подключены.
+- `mvp_score` и Telegram smart-алерты отложены по решению пользователя.
+- Non-notice event обновляет статус только если Lot уже существует по `regNum`.
+
+**Следующее:**
+- Запустить demo-БД командой `python scripts/load_demo_tyumen_data.py --reset`, поднять backend/frontend и пройти страницы `/`, `/lots`, `/lots/:id`, `/notices`, `/ingest`.
+- После ручного smoke-test переходить к проектированию `CadastralEnrichment` / НСПД-клиента.
+
+---
+
+## 2026-05-07 - Исправления ingest по итогам source discovery
+
+**Цель:** применить high-priority выводы разведки источников без live-ingest и без массовых сетевых запросов.
+
+**Что сделано:**
+- Региональная семантика OpenData исправлена: `normalize_lot()` теперь берёт `region` из `subjectEstateCode`, а не из `subjectRightHolderCode`.
+- После detail-fetch ingest перепроверяет регион через `lots[].biddingObjectInfo.subjectRF.code`; если detail уточнил регион не из `TARGET_REGION_CODES`, Lot не создаётся/не обновляется.
+- Default локального фокуса изменён на `TARGET_REGION_CODES=72`; `.env.example` теперь описывает `subjectEstateCode`, а не регион правообладателя.
+- `detail_parser` извлекает `permitted_use_codes` из `characteristics[code=PermittedUse].characteristicValue[].code` и `subject_region_code` из `subjectRF.code`.
+- ИЖС-детектор теперь предпочитает код ВРИ whitelist `2.1/2.2/2.3/13.1/13.2` с prefix-match (`2.1.2001` считается, `2.7.2001` не считается); `IZHS_KEYWORDS` оставлен fallback'ом, если кода ВРИ нет.
+- Ingest перестал создавать пустые Lot из non-notice документов:
+  - `clarifications` сохраняется как `OpenDataNotice`, но Lot не создаёт;
+  - `noticeCancel/noticeStop/noticeResumption/noticeAnnulment` обновляют статус существующего Lot, если он найден.
+- Обновлены тесты на регион, ВРИ-коды, false-positive `2.7.2001` + случайный текст `2.1`, `clarifications` и cancel-event.
+- Обновлены [AGENTS.md](AGENTS.md) и [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) под новое поведение ingest.
+
+**Затронутые файлы:**
+- .env.example
+- backend/app/config.py
+- backend/app/services/ingest/normalizer.py
+- backend/app/services/ingest/detail_parser.py
+- backend/app/services/ingest/service.py
+- backend/tests/test_detail_parser.py
+- backend/tests/test_ingest_service.py
+- backend/tests/test_normalizer_notices.py
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 52 passed.
+
+**Известные проблемы / TODO:**
+- ФИАС-иерархия всё ещё не извлекается в нормализованный муниципалитет.
+- НСПД endpoint найден разведкой, но клиент и модель обогащения ещё не подключены.
+- Non-notice event сейчас обновляет статус только если Lot уже существует по `regNum`; исторические/неслинкованные кейсы могут требовать отдельного backfill.
+
+**Следующее:**
+- Добавить извлечение муниципалитета из `estateAddressFIAS.addressByFIAS.hierarchyObjects[]`.
+- После этого проектировать `CadastralEnrichment` и НСПД-клиент.
+
+---
+
+## 2026-05-07 - Разведка источников ГИС Торги / НСПД для ИЖС-мониторинга в Тюменской области
+
+**Цель:** проверить, действительно ли проект качает нужные данные из ГИС Торги, и зафиксировать минимально достаточный набор источников для мониторинга земельных участков под ИЖС в Тюменской области и Тюмени.
+
+**Что сделано (только разведка, БД не трогали, `.env` не редактировали, `git commit` не делали):**
+
+1. **OpenData ГИС Торги:** скачан свежий day-файл через `scripts/fetch_latest_opendata.py`:
+   - `data/raw/data-20260506T0000-20260507T0000-structure-20240401.json` (1568 записей, 15 по Тюмени).
+   - Подтверждено: проект качает правильный dataset `7710568760-notice` (карточка `61f2a3bf11d8ab36f6c1b275`), schema `structure-20240401`.
+2. **Локальный union 4 day-файлов** (22, 27, 29 апр + 6-7 мая) → 77 записей по Тюмени (`subjectEstateCode=72 OR subjectRightHolderCode=72`), сохранён в `data/raw/torgi_opendata_tyumen_union.json`. Распределение: 41 ZK, 8 229FZ, 8 178FZ, 6 концессий, 6 1041PP и т.д.
+3. **Точечный fetch 16 notice detail JSON** (12 ZK + 1 178FZ + 1 APGU + 1 1041PP + 1 229FZ-cancel) через одноразовый скрипт (без `run_ingest`):
+   - Raw сохранены в `data/raw/torgi_sample_lots_full_20260507/<regNum>.json`.
+   - Прогон через `detail_parser.parse_notice_detail()`: coverage 75-100% по всем нужным полям (`cadastral_number 81%`, `area_sqm 87.5%`, `land_category 93.8%`, `permitted_use_text/code 75%`, `address 93.8%`, `start_price 81%`, `lot_name 100%`, `subjectRF_code 93.8%`, `municipality_fias 93.8%`, `lot_status 93.8%`, `bidd_dates 93.8%`, `organizer 93.8%`, `ui_href 100%`).
+   - Сводка: `data/raw/torgi_sample_lots_20260507.json`.
+4. **HTML / SPA-XHR probe** торгов (`data/raw/torgi_ui_probe_20260507.json`):
+   - HTML карточек `/new/public/notices/view/<id>` — пустой SPA-shell (одинаковые 22.7 KB), парсить нет смысла.
+   - **Найден рабочий публичный SPA endpoint** `/new/api/public/notices/search?dynSubjRF=72&biddType=ZK&size=5` (200 OK, Spring pageable, 63 KB). Каждый item содержит `lots[].attributes[]` — те же поля, что в notice detail. Это альтернативный pipeline c серверной фильтрацией.
+5. **НСПД discovery** (`data/raw/nspd_samples_20260507.json`):
+   - Проверены 5 endpoint-шаблонов на 1 кадастре: только **`https://nspd.gov.ru/api/geoportal/v1/search/geoportal?query=<cadnum>&thematicSearchId=1`** отвечает 200 (остальные 403/404).
+   - Прогнаны 8 кадастров из выборки: 8/8 успешно. Ответ — GeoJSON Feature с полигоном (EPSG:3857) и `properties.options`: `cad_num, specified_area, declared_area, land_record_category_type, permitted_use_established_by_document, readable_address, cost_value (кадастровая стоимость, БОНУС не в Торгах), cost_index (УПКС), quarter_cad_number, ownership_type, status`.
+6. **Сравнение ИЖС-детектора** (`_recon_compare_izhs.py`): по PermittedUse.code (whitelist + prefix) = 7/16, по текущему `match_izhs()` (substring) = 7/16, **но 2 mismatch'а** (1 false positive — лот за 49 млн руб с ВРИ `2.7.2001` ошибочно ловится на substring `2.1`; 1 false negative — лот с ВРИ `2.2` не ловится keyword'ом). Доля ошибок ≈12.5% даже на маленькой выборке.
+
+**Ключевые находки и узкие места текущего ingest (зафиксированы в отчёте, НЕ применены):**
+
+1. **`TARGET_REGION_CODES=""` по умолчанию** — фильтра региона нет, БД растёт всеми регионами.
+2. **Семантика регионального фильтра неправильная**: `normalizer.region` берёт `subjectRFCode` (нет в schema 20240401) → fallback на `subjectRightHolderCode` (регион правообладателя, а не земли). В выборке 1/16 лот с `estate=86 (ХМАО) / right=72 (Тюмень)` — будет ошибочно засчитан как Тюменский. Правильный ключ: `subjectEstateCode` + кросс-валидация через detail `lots[].biddingObjectInfo.subjectRF.code`.
+3. **ИЖС-детектор по substring `2.1` шумит** (см. п.6 выше). Рекомендация: переключить на `characteristics[code=PermittedUse].characteristicValue[].code` против белого списка.
+4. **`documentType=clarifications` пишется как Lot**, хотя это разъяснение к существующему извещению (без `lots[].biddingObjectInfo`). Аналогично `noticeStop/Resumption/Annulment` — должны менять статус существующего лота, а не создавать новый.
+5. **ФИАС-иерархия не извлекается** — нельзя нормально фильтровать по муниципалитету.
+
+**Ответы на главный вопрос:**
+
+- **Скачивает ли текущий проект правильные данные?** Да. Dataset `7710568760-notice`, schema `20240401`, schema discovery работает, watermark и идемпотентность работают.
+- **Достаточно ли OpenData ГИС Торги для MVP?** Listings (`listObjects`) — нет, это только индекс. **Достаточно OpenData listObjects + fetched notice detail JSON** (наш текущий двухступенчатый ingest), 75-100% coverage.
+- **Что нужно из карточки лота?** Всё, что не влезло в listObjects: `characteristics.CadastralNumber/SquareZU/PermittedUse(code)`, `category`, `estateAddressFIAS`, `lotStatus`, `priceMin`, `bidderOrg`, `biddConditions.bidd*Time`, `commonInfo.href` (UI-ссылка), `subjectRF.code`. Уже извлекается, кроме FIAS-иерархии и `subjectRF.code` и **кода** PermittedUse.
+- **Что нужно из НСПД?** Геометрия (для карты), кадастровая стоимость + УПКС (для скоринга/baseline), точная площадь (для кросс-валидации). Не блокирует MVP.
+- **Какие изменения нужны в текущем ingest?** См. рекомендации в `data/raw/source_discovery_20260507.md` (6 high-priority + 2 mid-priority пунктов).
+
+**Артефакты в `data/raw/`:**
+
+- `source_discovery_20260507.md` — финальный отчёт с таблицей «поле → источник → надёжность», 16 примерами лотов, mermaid-диаграммой, рекомендациями.
+- `source_discovery_20260507.json` — машиночитаемая сводка.
+- `torgi_opendata_tyumen_union.json` — union 4 day-файлов по Тюмени (77 записей).
+- `torgi_sample_lots_20260507.json` — обогащённая выборка 16 лотов.
+- `torgi_sample_lots_full_20260507/<regNum>.json` × 16 — исходные detail JSON.
+- `torgi_ui_probe_20260507.json` — HTML/SPA probe.
+- `nspd_samples_20260507.json` — 8 ответов НСПД.
+- `data-20260506T0000-20260507T0000-structure-20240401.json` — свежий day-файл OpenData.
+
+**Скрипты разведки** (одноразовые, помечены префиксом `_recon_`, в проде не используются):
+
+- `backend/scripts/_recon_pick_sample.py`
+- `backend/scripts/_recon_fetch_details.py`
+- `backend/scripts/_recon_summarize_sample.py`
+- `backend/scripts/_recon_check_html_and_ui.py`
+- `backend/scripts/_recon_probe_nspd.py`
+- `backend/scripts/_recon_compare_izhs.py`
+- `backend/scripts/_recon_build_report.py`
+
+**Что НЕ сделано (по условию задачи):**
+
+- Не запускали `run_ingest()` / `import_opendata_to_db.py`.
+- Не редактировали `.env`.
+- Не правили `backend/app/...` / `frontend/src/...`.
+- Не делали `git commit` / `git push`.
+
+**Следующие шаги** (после утверждения отчёта, отдельной задачей):
+
+- Применить рекомендации по `region`-фильтру (estate-based + subjectRF.code из detail).
+- Переключить ИЖС-детектор на PermittedUse.code whitelist.
+- Маршрутизировать `documentType` (notice → upsert, остальное → status update).
+- Добавить ФИАС-извлечение муниципалитета.
+- Подключить НСПД-обогащение по найденному endpoint'у.
+
+---
+
 ## 2026-05-06 - Закрытие технических рисков: карта, CI, lifespan, dev SQLite, MapLibre chunk
 
 **Что сделано:**

@@ -33,6 +33,8 @@ export type Lot = {
   end_date: string | null;
   cadastral_number: string | null;
   area_sqm: number | null;
+  municipality: string | null;
+  settlement: string | null;
   is_izhs_candidate: boolean;
   /** Rub per sotka (100 m²) from notice; not market valuation. */
   start_price_per_sotka: number | null;
@@ -63,6 +65,7 @@ export type LotDetail = Lot & {
   organizer_inn: string | null;
   land_category: string | null;
   permitted_use: string | null;
+  permitted_use_codes: string | null;
   address: string | null;
   notice_detail_url: string | null;
   opendata_notice_id: number | null;
@@ -96,9 +99,23 @@ export type LotFacets = {
   category: string[];
   status: string[];
   region: string[];
+  municipality: string[];
 };
 
 export type OpenDataNoticeFacets = {
   bidd_type_code: string[];
   document_type: string[];
+};
+
+export type LotQualityMetrics = {
+  region: string | null;
+  total: number;
+  izhs_candidates: number;
+  with_municipality: number;
+  with_cadastral: number;
+  with_area: number;
+  with_start_price: number;
+  with_price_per_sotka: number;
+  with_baseline: number;
+  with_positive_discount: number;
 };

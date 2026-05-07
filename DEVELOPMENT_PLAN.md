@@ -120,13 +120,26 @@
 - Добавлена Alembic-ревизия `20260506_06_add_ingest_observability.py`.
 - Выполнен `python scripts/dev_sync_schema.py` для локальной SQLite.
 
+**Выполнено 2026-05-07:**
+- Внешняя source discovery подтвердила правильный dataset `7710568760-notice`, schema `20240401`, и достаточность OpenData index + notice detail JSON для MVP.
+- Исправлены high-priority проблемы ingest по итогам разведки:
+  - регион OpenData нормализуется из `subjectEstateCode`, а после detail-fetch перепроверяется через `lots[].biddingObjectInfo.subjectRF.code`;
+  - ИЖС-кандидат определяется по `PermittedUse.code` whitelist `2.1/2.2/2.3/13.1/13.2` с prefix-match, keyword'и оставлены fallback'ом;
+  - `clarifications` больше не создаёт пустой Lot, а `noticeCancel/noticeStop/noticeResumption/noticeAnnulment` обновляют статус существующего Lot;
+  - локальный default `TARGET_REGION_CODES=72`.
+- Добавлены поля `Lot.permitted_use_codes`, `Lot.municipality`, `Lot.settlement` + Alembic-ревизия `20260507_07_add_lot_municipality_fields.py`.
+- Добавлен offline demo-loader `scripts/load_demo_tyumen_data.py --reset`, который загружает Тюменскую выборку из `data/raw` без сети.
+- Добавлен `/api/lots/quality` для метрик качества данных Dashboard.
+- Frontend получил Dashboard-метрики качества, быстрые фильтры `/lots` (`has_cadastral`, `has_price_per_sotka`, `has_positive_discount`) и базовый ErrorBoundary.
+
 **Задачи:**
-- Повторить live-верификацию `detail_parser` на свежем окне данных после доступности Торгов:
+- При необходимости повторить расширенную live-верификацию `detail_parser` на свежем окне данных:
   - `python scripts/verify_detail_parser_window.py --days 10 --limit-per-day 80`;
   - зафиксировать coverage по `is_land_plot=true` для `cadastral_number`, `area_sqm`, `permitted_use`, `start_price`.
 - Закрыть исторический разрыв `Lot` -> `OpenDataNotice`:
   - прогнать `backend/scripts/link_lots_to_notices.py`;
   - добавить в WORKLOG фактическое число слинкованных записей.
+- Расширить ФИАС-слой при необходимости до отдельного справочника муниципалитетов/населённых пунктов.
 
 **Критерий готовности:**
 - Есть измеренный baseline качества парсера на свежем окне.
@@ -250,7 +263,7 @@
 
 ## Приоритет на следующий рабочий заход
 
-1. Для внешнего ИИ с российским IP: выполнить задачи A и B из раздела 0 и вернуть артефакты в `data/raw/`.
-2. Для текущего Codex/VPN-окружения: начать следующий локальный слой ценности без обращения к Торгам — baseline-оценку по собственной базе торгов.
-3. После получения live-артефактов от внешнего ИИ: обновить coverage baseline, проверить parser gaps и решить, нужно ли править `detail_parser`.
-4. После НСПД discovery начинать проектирование `CadastralEnrichment`, потому что без надежного кадастрового слоя valuation будет стоять на зыбком основании.
+1. Запустить MVP вручную на demo-БД и пройти smoke-test страниц `/`, `/lots`, `/lots/:id`, `/notices`, `/ingest`.
+2. Спроектировать и добавить `CadastralEnrichment` / НСПД-клиент на основе найденного endpoint'а `api/geoportal/v1/search/geoportal`.
+3. После НСПД-слоя уточнить baseline и перейти к Циан/рыночным аналогам.
+4. `investment_score` и Telegram smart-алерты пока отложены по решению пользователя.

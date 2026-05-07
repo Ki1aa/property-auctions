@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 
 DETAIL_FETCH_RETRY_BACKOFF_SEC = 1.5
 STRUCTURE_VERSION_RE = re.compile(r"structure-(\d+)")
+LOT_CREATING_OPENDATA_DOCUMENT_TYPES = frozenset(("notice",))
+OPENDATA_EVENT_STATUS = {
+    "noticeCancel": "CANCELED",
+    "noticeStop": "STOPPED",
+    "noticeResumption": "PUBLISHED",
+    "noticeAnnulment": "ANNULLED",
+}
 SOURCE_UNAVAILABLE_MARKERS = (
     "torgi opendata:",
     "connecterror",
@@ -132,6 +139,18 @@ def _is_opendata_form(item: Any) -> bool:
     )
 
 
+def _opendata_document_type(item: Any) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    document_type = item.get("documentType")
+    return document_type if isinstance(document_type, str) and document_type else None
+
+
+def _creates_lot_from_opendata(item: Any) -> bool:
+    document_type = _opendata_document_type(item)
+    return document_type is None or document_type in LOT_CREATING_OPENDATA_DOCUMENT_TYPES
+
+
 def _structure_version_from_url(url: str | None) -> str | None:
     if not url:
         return None
@@ -195,6 +214,37 @@ def _upsert_opendata_notice(
         existing.structure_version = structure_version
     db.flush()
     return existing
+
+
+def _apply_opendata_event_to_existing_lot(
+    db: Session, item: dict[str, Any], *, opendata_notice_id: int | None
+) -> bool:
+    """Apply non-notice OpenData event documents without creating empty lots."""
+    if not _is_opendata_form(item):
+        return False
+    document_type = _opendata_document_type(item)
+    if document_type in LOT_CREATING_OPENDATA_DOCUMENT_TYPES:
+        return False
+
+    source_id = item.get("regNum")
+    if not isinstance(source_id, str) or not source_id:
+        return False
+
+    lot = db.scalar(select(Lot).where(Lot.source_id == source_id))
+    if lot is None:
+        return False
+
+    changed = False
+    new_status = OPENDATA_EVENT_STATUS.get(document_type or "")
+    if new_status and lot.status != new_status:
+        lot.status = new_status
+        changed = True
+    if opendata_notice_id is not None and lot.opendata_notice_id is None:
+        lot.opendata_notice_id = opendata_notice_id
+        changed = True
+    if changed:
+        db.commit()
+    return changed
 
 
 def _write_manifest(
@@ -303,11 +353,18 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                     notice = _upsert_opendata_notice(db, item, structure_version)
                     notice_id = notice.id if notice is not None else None
 
+                    if _is_opendata_form(item) and not _creates_lot_from_opendata(item):
+                        if _apply_opendata_event_to_existing_lot(db, item, opendata_notice_id=notice_id):
+                            changed_count += 1
+                        continue
+
                     detail_fetch_count = await _maybe_enrich_with_detail(
                         normalized,
                         izhs_keywords=izhs_keywords,
                         already_fetched=detail_fetch_count,
                     )
+                    if not _passes_region_filter(normalized, allowed_regions):
+                        continue
                     is_changed = await _upsert_lot(db, normalized, opendata_notice_id=notice_id)
                     file_upserted += 1
                     upserted_count += 1
@@ -444,8 +501,15 @@ async def _maybe_enrich_with_detail(
     normalized["area_sqm"] = parsed.get("area_sqm")
     normalized["land_category"] = parsed.get("land_category")
     normalized["permitted_use"] = parsed.get("permitted_use")
+    permitted_use_codes = parsed.get("permitted_use_codes")
+    if isinstance(permitted_use_codes, list):
+        normalized["permitted_use_codes"] = ", ".join(str(code) for code in permitted_use_codes if code)
     normalized["address"] = parsed.get("address")
+    normalized["municipality"] = parsed.get("municipality")
+    normalized["settlement"] = parsed.get("settlement")
     normalized["notice_detail_url"] = detail_url
+    if parsed.get("subject_region_code"):
+        normalized["region"] = parsed["subject_region_code"]
     if parsed.get("lot_name"):
         normalized["title"] = parsed["lot_name"]
     if parsed.get("start_price") is not None and not normalized.get("start_price"):
@@ -499,7 +563,10 @@ async def _upsert_lot(
     lot.area_sqm = normalized.get("area_sqm")
     lot.land_category = normalized.get("land_category")
     lot.permitted_use = normalized.get("permitted_use")
+    lot.permitted_use_codes = normalized.get("permitted_use_codes")
     lot.address = normalized.get("address")
+    lot.municipality = normalized.get("municipality")
+    lot.settlement = normalized.get("settlement")
     lot.notice_detail_url = normalized.get("notice_detail_url")
     lot.is_izhs_candidate = bool(normalized.get("is_izhs_candidate"))
     if opendata_notice_id is not None:

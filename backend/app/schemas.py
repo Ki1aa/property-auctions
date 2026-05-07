@@ -17,6 +17,8 @@ class LotListItem(BaseModel):
     end_date: datetime | None
     cadastral_number: str | None = None
     area_sqm: float | None = None
+    municipality: str | None = None
+    settlement: str | None = None
     is_izhs_candidate: bool = False
     # From notice: start_price / area; not market valuation. None if price or area missing.
     start_price_per_sotka: float | None = None
@@ -45,6 +47,7 @@ class LotDetail(LotListItem):
     organizer_inn: str | None
     land_category: str | None = None
     permitted_use: str | None = None
+    permitted_use_codes: str | None = None
     address: str | None = None
     notice_detail_url: str | None = None
     opendata_notice_id: int | None = None
@@ -98,8 +101,22 @@ class LotFacets(BaseModel):
     category: list[str]
     status: list[str]
     region: list[str]
+    municipality: list[str]
 
 
 class OpenDataNoticeFacets(BaseModel):
     bidd_type_code: list[str]
     document_type: list[str]
+
+
+class LotQualityMetrics(BaseModel):
+    region: str | None = None
+    total: int
+    izhs_candidates: int
+    with_municipality: int
+    with_cadastral: int
+    with_area: int
+    with_start_price: int
+    with_price_per_sotka: int
+    with_baseline: int
+    with_positive_discount: int

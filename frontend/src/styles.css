@@ -202,6 +202,14 @@ h2 {
   justify-content: flex-end;
 }
 
+.quick-filters {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
 .filters__facet-block {
   grid-column: 1 / -1;
   display: flex;
@@ -634,6 +642,51 @@ tr:hover td {
   font-weight: 500;
 }
 
+.quality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.quality-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+
+.quality-tile__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.quality-tile__top strong {
+  font-size: 18px;
+}
+
+.quality-tile__bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-soft);
+  margin: 10px 0 6px;
+}
+
+.quality-tile__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+}
+
+.quality-tile small {
+  color: var(--text-muted);
+}
+
 /* Card (lot detail) */
 .card {
   background: var(--surface);
@@ -687,6 +740,23 @@ tr:hover td {
   border-radius: 10px;
   margin: 0;
   font-size: 14px;
+}
+
+.error-panel {
+  background: var(--surface);
+  border: 1px solid var(--error-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.error-panel p {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .back-link {

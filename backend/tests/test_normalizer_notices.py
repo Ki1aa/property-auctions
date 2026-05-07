@@ -18,6 +18,7 @@ def test_normalize_lot_from_opendata_notice():
     assert normalized["source_id"] == "21000035130000000340"
     assert normalized["title"].startswith("Извещение")
     assert normalized["status"] == "notice"
+    assert normalized["region"] == "77"
     assert normalized["category"] == "178FZ"
     assert normalized["source_url"] == item["href"]
     assert normalized["organizer"]["source_id"] == "2100003513"

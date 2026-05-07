@@ -132,6 +132,33 @@ REAL_SCHEMA_NOTICE = {
     }
 }
 
+REAL_FIAS_NOTICE = {
+    "exportObject": {
+        "structuredObject": {
+            "notice": {
+                "lots": [
+                    {
+                        "lotName": "Земельный участок",
+                        "biddingObjectInfo": {
+                            "subjectRF": {"code": "72", "name": "Тюменская область"},
+                            "estateAddressFIAS": {
+                                "addressByFIAS": {
+                                    "name": "г Тюмень",
+                                    "level": {"code": 5},
+                                    "hierarchyObjects": [
+                                        {"name": "обл Тюменская", "level": {"code": 1}},
+                                        {"name": "г.о. город Тюмень", "level": {"code": 3}},
+                                    ],
+                                }
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+    }
+}
+
 
 def test_parse_notice_detail_extracts_cadastral_and_area():
     result = parse_notice_detail(SAMPLE_NOTICE)
@@ -176,8 +203,16 @@ def test_parse_notice_detail_supports_real_schema_characteristics():
     assert result["area_sqm"] == 1410.0
     assert result["land_category"] == "Земли населенных пунктов"
     assert result["permitted_use"] == "Размещение гаражей для собственных нужд"
+    assert result["permitted_use_codes"] == ["2.7.2002"]
     assert result["address"] == "край Хабаровский, м.р-н Николаевский"
     assert result["start_price"] == 213386.58
+
+
+def test_parse_notice_detail_extracts_subject_region_and_fias_municipality():
+    result = parse_notice_detail(REAL_FIAS_NOTICE)
+    assert result["subject_region_code"] == "72"
+    assert result["municipality"] == "г.о. город Тюмень"
+    assert result["settlement"] == "г Тюмень"
 
 
 def test_match_izhs_positive():
@@ -197,6 +232,49 @@ def test_match_izhs_empty_keywords_returns_false():
 def test_match_izhs_case_insensitive():
     payload = {"description": "ижс участок"}
     assert match_izhs(payload, ["ИЖС"]) is True
+
+
+def test_match_izhs_prefers_permitted_use_code_over_incidental_keyword():
+    payload = {
+        "lotDescription": "Пункт 2.1 регламента не является ВРИ участка",
+        "lots": [
+            {
+                "biddingObjectInfo": {
+                    "characteristics": [
+                        {
+                            "code": "PermittedUse",
+                            "characteristicValue": [
+                                {"code": "2.7.2001", "name": "Обслуживание жилой застройки"}
+                            ],
+                        }
+                    ]
+                }
+            }
+        ],
+    }
+    assert match_izhs(payload, ["ИЖС", "2.1"]) is False
+
+
+def test_match_izhs_accepts_permitted_use_code_whitelist_prefixes():
+    payload = {
+        "lots": [
+            {
+                "biddingObjectInfo": {
+                    "characteristics": [
+                        {
+                            "code": "PermittedUse",
+                            "characteristicValue": [
+                                {"code": "2.2", "name": "Для малоэтажной жилой застройки"},
+                                {"code": "2.1.2001", "name": "Для индивидуального жилого дома"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ],
+    }
+    assert parse_notice_detail(payload)["permitted_use_codes"] == ["2.2", "2.1.2001"]
+    assert match_izhs(payload, []) is True
 
 
 def test_split_keywords_strips_blanks():
