@@ -95,6 +95,23 @@ export type IngestRun = {
   error_message: string | null;
 };
 
+export type IngestStatus = {
+  is_running: boolean;
+  scheduler_running: boolean;
+  next_run_at: string | null;
+  ingest_mode: string;
+  interval_minutes: number;
+  run_on_startup: boolean;
+  fetch_notice_details: boolean;
+  detail_max_per_run: number;
+  target_region_codes: string;
+};
+
+export type ManualIngestStartResponse = {
+  started: boolean;
+  message: string;
+};
+
 export type LotFacets = {
   category: string[];
   status: string[];

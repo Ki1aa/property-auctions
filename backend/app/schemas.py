@@ -81,6 +81,23 @@ class IngestRunView(BaseModel):
     error_message: str | None
 
 
+class IngestStatusView(BaseModel):
+    is_running: bool
+    scheduler_running: bool
+    next_run_at: datetime | None = None
+    ingest_mode: str
+    interval_minutes: int
+    run_on_startup: bool
+    fetch_notice_details: bool
+    detail_max_per_run: int
+    target_region_codes: str
+
+
+class ManualIngestStartResponse(BaseModel):
+    started: bool
+    message: str
+
+
 class OpenDataNoticeListItem(BaseModel):
     id: int
     reg_num: str

@@ -131,6 +131,7 @@
 - Добавлен offline demo-loader `scripts/load_demo_tyumen_data.py --reset`, который загружает Тюменскую выборку из `data/raw` без сети.
 - Добавлен `/api/lots/quality` для метрик качества данных Dashboard.
 - Frontend получил Dashboard-метрики качества, быстрые фильтры `/lots` (`has_cadastral`, `has_price_per_sotka`, `has_positive_discount`) и базовый ErrorBoundary.
+- Страница `/ingest` получила понятный статус загрузчика, расписание, следующий запуск и кнопку ручного запуска operational ingest; backend добавил `/api/ingest-status` и `POST /api/ingest-runs/start`.
 
 **Задачи:**
 - При необходимости повторить расширенную live-верификацию `detail_parser` на свежем окне данных:

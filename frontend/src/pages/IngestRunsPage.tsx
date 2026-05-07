@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchIngestRuns } from "../api";
+import { fetchIngestRuns, fetchIngestStatus, startIngestNow } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
-import { IngestRun } from "../types";
+import { IngestRun, IngestStatus } from "../types";
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -17,6 +17,18 @@ function durationMs(started: string | null, finished: string | null): string {
   if (sec < 60) return `${sec.toFixed(1)} с`;
   const min = sec / 60;
   return `${min.toFixed(1)} мин`;
+}
+
+function intervalLabel(minutes: number): string {
+  if (minutes >= 1440 && minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? "раз в сутки" : `раз в ${days} дн.`;
+  }
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "раз в час" : `раз в ${hours} ч.`;
+  }
+  return `раз в ${minutes} мин.`;
 }
 
 const errorKindLabels: Record<string, string> = {
@@ -59,15 +71,19 @@ function friendlyError(run: IngestRun): { text: string; title?: string } {
 
 export function IngestRunsPage() {
   const [runs, setRuns] = useState<IngestRun[]>([]);
+  const [status, setStatus] = useState<IngestStatus | null>(null);
   const [error, setError] = useState("");
+  const [startMessage, setStartMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
 
   async function load() {
     try {
       setIsLoading(true);
       setError("");
-      const data = await fetchIngestRuns(50);
+      const [data, ingestStatus] = await Promise.all([fetchIngestRuns(50), fetchIngestStatus()]);
       setRuns(data);
+      setStatus(ingestStatus);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -75,21 +91,90 @@ export function IngestRunsPage() {
     }
   }
 
+  async function handleStart() {
+    try {
+      setIsStarting(true);
+      setStartMessage("");
+      setError("");
+      const response = await startIngestNow();
+      setStartMessage(response.message);
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!status?.is_running) return undefined;
+    const id = window.setInterval(() => {
+      void load();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [status?.is_running]);
 
   return (
     <div className="page">
       <div className="page__heading">
         <h1>Загрузки данных</h1>
-        <button className="button button--ghost" onClick={() => void load()} disabled={isLoading}>
-          Обновить
-        </button>
+        <div className="page__actions">
+          <button
+            type="button"
+            onClick={() => void handleStart()}
+            disabled={isStarting || status?.is_running}
+          >
+            {status?.is_running ? "Загрузка идёт" : isStarting ? "Запускаю…" : "Запустить загрузку"}
+          </button>
+          <button className="button button--ghost" onClick={() => void load()} disabled={isLoading}>
+            Обновить
+          </button>
+        </div>
       </div>
       <p className="page__subtitle">История последних 50 запусков ingest-пайплайна</p>
 
       {error && <p className="error">{error}</p>}
+      {startMessage && <p className="notice">{startMessage}</p>}
+
+      <section className="ingest-status">
+        <div>
+          <span className="ingest-status__label">Сейчас</span>
+          <strong>{status?.is_running ? "идёт загрузка" : "не загружает"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Автоматически</span>
+          <strong>
+            {status
+              ? status.scheduler_running
+                ? intervalLabel(status.interval_minutes)
+                : "планировщик выключен"
+              : "—"}
+          </strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Следующий запуск</span>
+          <strong>{status?.next_run_at ? formatDate(status.next_run_at) : "—"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Фокус</span>
+          <strong>{status?.target_region_codes || "все регионы"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Detail JSON</span>
+          <strong>{status?.fetch_notice_details ? `включён, до ${status.detail_max_per_run}` : "выключен"}</strong>
+        </div>
+      </section>
+
+      <p className="help-text">
+        Загрузка не идёт постоянно: планировщик запускает ingest по расписанию, а кнопка выше запускает такой же
+        operational-проход вручную. Если источник недоступен или вернул новый формат, это появится в последней строке
+        истории как тип сбоя и сообщение.
+      </p>
+
       {isLoading ? (
         <p className="loading">Загрузка…</p>
       ) : runs.length === 0 ? (

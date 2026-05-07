@@ -12,14 +12,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import IngestRun, Lot, OpenDataNotice, Organizer
+from app import scheduler as ingest_scheduler
+from app.config import settings
 from app.schemas import (
     IngestRunView,
+    IngestStatusView,
     LotDetail,
     LotFacets,
     LotListItem,
     LotListPage,
     LotQualityMetrics,
     MapPoint,
+    ManualIngestStartResponse,
     OpenDataNoticeFacets,
     OpenDataNoticeListItem,
     OpenDataNoticeListPage,
@@ -640,6 +644,35 @@ def map_points(db: Session = Depends(get_db)):
 def get_ingest_runs(limit: int = Query(default=20, ge=1, le=200), db: Session = Depends(get_db)):
     rows = db.scalars(select(IngestRun).order_by(desc(IngestRun.started_at)).limit(limit)).all()
     return [IngestRunView.model_validate(row, from_attributes=True) for row in rows]
+
+
+@router.get("/ingest-status", response_model=IngestStatusView)
+def get_ingest_status():
+    return IngestStatusView(
+        is_running=ingest_scheduler.is_ingest_running(),
+        scheduler_running=ingest_scheduler.scheduler.running,
+        next_run_at=ingest_scheduler.next_scheduled_ingest_at(),
+        ingest_mode=settings.ingest_mode,
+        interval_minutes=settings.ingest_interval_minutes,
+        run_on_startup=settings.run_ingest_on_startup,
+        fetch_notice_details=settings.ingest_fetch_notice_details,
+        detail_max_per_run=settings.ingest_detail_max_per_run,
+        target_region_codes=settings.target_region_codes,
+    )
+
+
+@router.post("/ingest-runs/start", response_model=ManualIngestStartResponse)
+async def start_ingest_now():
+    started = ingest_scheduler.start_manual_ingest(mode="operational")
+    if not started:
+        return ManualIngestStartResponse(
+            started=False,
+            message="Загрузка уже выполняется. Обновите статус через несколько секунд.",
+        )
+    return ManualIngestStartResponse(
+        started=True,
+        message="Загрузка запущена в фоне. История обновится после завершения или ошибки.",
+    )
 
 
 @router.get("/opendata-notices/facets", response_model=OpenDataNoticeFacets)

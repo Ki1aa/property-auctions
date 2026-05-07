@@ -120,6 +120,8 @@ alembic current
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
 - `GET /api/ingest-runs` - история запусков загрузчика с диагностикой файлов: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`.
+- `GET /api/ingest-status` - текущее состояние ingest: идёт ли загрузка, включён ли планировщик, следующий запуск, интервал, региональный фокус.
+- `POST /api/ingest-runs/start` - ручной запуск operational ingest в фоне; если загрузка уже идёт, возвращает `started=false`.
 - `GET /api/opendata-notices` - страница извещений: JSON `{ items, total, limit, offset }` с фильтрами `document_type/bidd_type_code/reg_num` и пагинацией `limit`/`offset`.
 
 ## Тесты

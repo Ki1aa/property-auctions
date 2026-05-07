@@ -1,11 +1,13 @@
 import {
   IngestRun,
+  IngestStatus,
   LotDetail,
   LotFacets,
   LotListPage,
   LotQualityMetrics,
   LotsSort,
   MapPoint,
+  ManualIngestStartResponse,
   NoticeListPage,
   OpenDataNoticeFacets,
 } from "./types";
@@ -18,7 +20,11 @@ export function getApiBaseUrl(): string {
 
 type RequestParam = string | number | boolean | undefined;
 
-async function request<T>(path: string, params?: Record<string, RequestParam | RequestParam[]>): Promise<T> {
+async function request<T>(
+  path: string,
+  params?: Record<string, RequestParam | RequestParam[]>,
+  init?: RequestInit,
+): Promise<T> {
   const query = new URLSearchParams();
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -35,7 +41,7 @@ async function request<T>(path: string, params?: Record<string, RequestParam | R
   const qs = query.toString();
   const url = `${baseUrl}${path}${qs ? `?${qs}` : ""}`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, init);
   if (!response.ok) {
     throw new Error(`Запрос ${path} не удался: HTTP ${response.status}`);
   }
@@ -144,4 +150,12 @@ export function fetchMapPoints(): Promise<MapPoint[]> {
 
 export function fetchIngestRuns(limit = 50): Promise<IngestRun[]> {
   return request<IngestRun[]>("/api/ingest-runs", { limit });
+}
+
+export function fetchIngestStatus(): Promise<IngestStatus> {
+  return request<IngestStatus>("/api/ingest-status");
+}
+
+export function startIngestNow(): Promise<ManualIngestStartResponse> {
+  return request<ManualIngestStartResponse>("/api/ingest-runs/start", undefined, { method: "POST" });
 }

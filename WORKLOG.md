@@ -6,6 +6,53 @@
 
 ---
 
+## 2026-05-07 - UX загрузок: статус, расписание и ручной запуск ingest
+
+**Цель:** сделать загрузки понятными пользователю: видно, идёт ли скачивание, работает ли планировщик, когда следующий автозапуск, и можно ли запустить загрузку вручную.
+
+**Что сделано:**
+- Backend:
+  - добавлен guarded ingest-runner с `asyncio.Lock`, чтобы manual/scheduled ingest не запускались параллельно;
+  - `scheduled_ingest()` теперь использует общий guarded runner;
+  - добавлен `GET /api/ingest-status` с полями `is_running`, `scheduler_running`, `next_run_at`, `interval_minutes`, `run_on_startup`, `fetch_notice_details`, `detail_max_per_run`, `target_region_codes`;
+  - добавлен `POST /api/ingest-runs/start`, который запускает operational ingest в фоне и возвращает `started=false`, если загрузка уже идёт.
+- Frontend `/ingest`:
+  - добавлена кнопка «Запустить загрузку»;
+  - показаны карточки статуса: сейчас идёт/не идёт, автоматический интервал, следующий запуск, региональный фокус, detail JSON;
+  - добавлено короткое объяснение: загрузка не постоянная, она идёт по расписанию или вручную; ошибки видны в истории;
+  - при активной загрузке страница автообновляется раз в 5 секунд.
+- Обновлены [README.md](README.md), [AGENTS.md](AGENTS.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).
+
+**Затронутые файлы:**
+- backend/app/scheduler.py
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/tests/test_api.py
+- frontend/src/api.ts
+- frontend/src/types.ts
+- frontend/src/pages/IngestRunsPage.tsx
+- frontend/src/styles.css
+- README.md
+- AGENTS.md
+- DEVELOPMENT_PLAN.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 55 passed.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 2 passed.
+- `npm.cmd run build` в `frontend/`: прошло; MapLibre остаётся крупным lazy chunk.
+- `GET http://localhost:8000/api/ingest-status`: 200 OK, показал `is_running=false`, `scheduler_running=true`, следующий запуск 2026-05-08.
+
+**Известные проблемы / TODO:**
+- Кнопка запускает настоящий live-ingest; при VPN/недоступности Торгов ожидаемо появится ошибка `source_unavailable` в истории.
+- Ручной запуск пока только `operational`, backfill из UI не добавлялся.
+
+**Следующее:**
+- Пройти ручной UX smoke-test `/ingest`: нажать кнопку в среде с доступом к Торгам и убедиться, что running/success/failed статусы понятны пользователю.
+
+---
+
 ## 2026-05-07 - MVP hardening: demo-data, ФИАС, Dashboard quality, frontend resilience
 
 **Цель:** выполнить пункты 1-5 MVP-плана: привести уже существующую функциональность к рабочему состоянию без `mvp_score` и без Telegram-алертов.

@@ -269,6 +269,44 @@ def test_ingest_runs_exposes_observability_fields():
     assert body[0]["error_kind"] == "source_unavailable"
 
 
+def test_ingest_status_and_manual_start_endpoint(monkeypatch):
+    _setup_inmemory_app()
+
+    class DummyScheduler:
+        running = True
+
+    monkeypatch.setattr("app.api.ingest_scheduler.is_ingest_running", lambda: False)
+    monkeypatch.setattr("app.api.ingest_scheduler.next_scheduled_ingest_at", lambda: None)
+    monkeypatch.setattr("app.api.ingest_scheduler.start_manual_ingest", lambda mode="operational": True)
+    monkeypatch.setattr("app.api.ingest_scheduler.scheduler", DummyScheduler())
+
+    client = TestClient(app)
+    status = client.get("/api/ingest-status")
+    assert status.status_code == 200
+    status_body = status.json()
+    assert status_body["is_running"] is False
+    assert status_body["scheduler_running"] is True
+    assert status_body["interval_minutes"] >= 1
+    assert "target_region_codes" in status_body
+
+    start = client.post("/api/ingest-runs/start")
+    assert start.status_code == 200
+    assert start.json()["started"] is True
+
+
+def test_manual_start_reports_existing_running_ingest(monkeypatch):
+    _setup_inmemory_app()
+
+    monkeypatch.setattr("app.api.ingest_scheduler.start_manual_ingest", lambda mode="operational": False)
+
+    client = TestClient(app)
+    response = client.post("/api/ingest-runs/start")
+
+    assert response.status_code == 200
+    assert response.json()["started"] is False
+    assert "уже выполняется" in response.json()["message"]
+
+
 def test_lot_facets_endpoint():
     TestingSessionLocal = _setup_inmemory_app()
 

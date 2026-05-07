@@ -136,6 +136,13 @@ a:hover {
   flex-wrap: wrap;
 }
 
+.page__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .page__heading h1 {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -740,6 +747,50 @@ tr:hover td {
   border-radius: 10px;
   margin: 0;
   font-size: 14px;
+}
+
+.notice {
+  background: var(--primary-soft);
+  color: var(--primary);
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.help-text {
+  margin: -6px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  max-width: 920px;
+}
+
+.ingest-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.ingest-status > div {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ingest-status__label {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ingest-status strong {
+  font-size: 15px;
 }
 
 .error-panel {
