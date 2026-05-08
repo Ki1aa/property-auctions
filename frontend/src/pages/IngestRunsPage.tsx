@@ -170,10 +170,6 @@ export function IngestRunsPage() {
           <strong>{status?.next_run_at ? formatDate(status.next_run_at) : "—"}</strong>
         </div>
         <div>
-          <span className="ingest-status__label">Фокус</span>
-          <strong>{status?.target_region_codes || "все регионы"}</strong>
-        </div>
-        <div>
           <span className="ingest-status__label">Detail JSON</span>
           <strong>{status?.fetch_notice_details ? `включён, до ${status.detail_max_per_run}` : "выключен"}</strong>
         </div>

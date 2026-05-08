@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     ingest_timeout_seconds: int = 30
     ingest_retry_count: int = 3
 
-    # Land plot focus (Tyumen + IZHS).
-    target_region_codes: str = "72"
+    # Empty means ingest all regions; comma-separated codes can narrow ingest scope.
+    target_region_codes: str = ""
     izhs_keywords: str = "ИЖС,индивидуальное жилищное строительство,для индивидуального жилого"
     ingest_fetch_notice_details: bool = True
     ingest_detail_max_per_run: int = 200

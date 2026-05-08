@@ -149,7 +149,7 @@ flowchart LR
         Discovery["discovery.py"]
         IngestSvc["service.py"]
         Normalizer["normalizer.py"]
-        RegionFilter{"region match TARGET_REGION_CODES?"}
+        RegionFilter{"TARGET_REGION_CODES set?"}
         DetailFetch["fetch href -> notice detail"]
         DetailParser["detail_parser.py: cadastral / ВРИ / категория / адрес"]
         IzhsMatch{"match_izhs keywords?"}
@@ -296,7 +296,7 @@ python scripts/repair_poisoned_ingest_manifests.py
 
 **Работает:**
 - Ingestion pipeline: 3-уровневый discovery, watermark, backfill, идемпотентность, schema-versioning - [backend/app/services/ingest/](backend/app/services/ingest).
-- **Региональный фильтр** (`TARGET_REGION_CODES`, по умолчанию `72`) работает по `subjectEstateCode` из OpenData и после detail-fetch кросс-проверяется через `lots[].biddingObjectInfo.subjectRF.code`; **обогащение деталями notice** заполняет cadastral_number, area_sqm, land_category, permitted_use, permitted_use_codes, municipality, settlement, address - [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py), [backend/app/services/ingest/detail_parser.py](backend/app/services/ingest/detail_parser.py).
+- **Региональный фильтр** (`TARGET_REGION_CODES`) по умолчанию пустой, поэтому ingest сохраняет все регионы РФ; если задать список кодов через запятую, фильтр работает по `subjectEstateCode` из OpenData и после detail-fetch кросс-проверяется через `lots[].biddingObjectInfo.subjectRF.code`. **Обогащение деталями notice** заполняет cadastral_number, area_sqm, land_category, permitted_use, permitted_use_codes, municipality, settlement, address - [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py), [backend/app/services/ingest/detail_parser.py](backend/app/services/ingest/detail_parser.py).
 - **Текстовые fallback'и парсера**: regex-площадь с единицами (кв.м/м²/га/сотки), ВРИ-маркеры в `lotName`/`description` (ИЖС, ЛПХ, КФХ, садоводство, огородничество), кадастр с пробелами и через `characteristics.code=CadastralNumber`.
 - **Сегментированная coverage-метрика**: разрез по `is_land_plot`, `land_category`, `lot_name` в [backend/scripts/verify_detail_parser_real.py](backend/scripts/verify_detail_parser_real.py); offline-режимы `--data-file` / `--reanalyze` / `--reanalyze-existing` для VPN-on прогонов.
 - **Retry detail-fetch**: один retry с backoff 1.5s в `_fetch_detail_with_retry` ([backend/app/services/ingest/service.py](backend/app/services/ingest/service.py)).
@@ -344,6 +344,7 @@ python scripts/repair_poisoned_ingest_manifests.py
 Закрыто в 2026-05-06: пункт «Наблюдаемость ingest» (`processed_files`, `failed_files`, `last_error_source_url`, `error_kind` в БД/API/UI).
 Закрыто в 2026-05-06: пункт «Baseline-оценка без внешних маркетплейсов» (`baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`, сортировка `discount_to_baseline_desc`, shortlist на Dashboard).
 Закрыто в 2026-05-06: технические риски `TradesMap.setHTML` XSS, deprecated FastAPI `@app.on_event`, frontend CI tests/build, dev SQLite index-sync, lazy MapLibre chunk.
-Закрыто в 2026-05-07: high-priority ingest fixes по итогам source discovery: `subjectEstateCode`/`subjectRF.code` для региона, ИЖС по `PermittedUse.code`, `documentType` events без создания пустых Lot, `TARGET_REGION_CODES=72` по умолчанию.
+Закрыто в 2026-05-07: high-priority ingest fixes по итогам source discovery: `subjectEstateCode`/`subjectRF.code` для региона, ИЖС по `PermittedUse.code`, `documentType` events без создания пустых Lot, настраиваемый `TARGET_REGION_CODES`.
 Закрыто в 2026-05-07: MVP hardening пункты 1-5: offline demo loader, ФИАС/муниципалитет, quality metrics Dashboard, quick quality filters, ErrorBoundary.
 Закрыто в 2026-05-07: UX загрузок: `/ingest` показывает текущий статус/расписание/следующий запуск и умеет запускать ingest вручную через `POST /api/ingest-runs/start`.
+Закрыто в 2026-05-08: ingest по умолчанию сохраняет все регионы РФ (`TARGET_REGION_CODES` пустой), региональный фокус убран из UI `/ingest`.
