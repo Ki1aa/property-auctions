@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { buildLotsExportUrl, fetchLotFacets, fetchLots } from "../api";
 import { FacetMultiPicker } from "../components/FacetMultiPicker";
@@ -41,6 +41,14 @@ function parseLotsSort(value: string | null): LotsSort {
 function parseOffset(value: string | null): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function normalizeRegionInput(value: string): string {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(",");
 }
 
 function queryStateFromSearchParams(params: URLSearchParams): LotsQueryState {
@@ -89,11 +97,6 @@ export function LotsPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  const regionOptions = useMemo(() => {
-    const s = new Set([...(facets?.region ?? []), ...(region ? [region] : [])]);
-    return Array.from(s).sort();
-  }, [facets, region]);
-
   const statusOptions = useMemo(() => {
     const s = new Set([...(facets?.status ?? []), ...(status ? [status] : [])]);
     return Array.from(s).sort();
@@ -129,8 +132,6 @@ export function LotsPage() {
     });
   }, [searchParams]);
 
-  const regionAsSelect =
-    Boolean(facets) && regionOptions.length > 0 && regionOptions.length <= FACET_SINGLE_SELECT_MAX;
   const statusAsSelect =
     Boolean(facets) && statusOptions.length > 0 && statusOptions.length <= FACET_SINGLE_SELECT_MAX;
   const municipalityAsSelect =
@@ -185,7 +186,8 @@ export function LotsPage() {
 
   function draftToSearchParams(nextOffset: number, nextSort: LotsSort): URLSearchParams {
     const next = new URLSearchParams();
-    if (region) next.set("region", region);
+    const normalizedRegion = normalizeRegionInput(region);
+    if (normalizedRegion) next.set("region", normalizedRegion);
     if (status) next.set("status", status);
     if (municipality) next.set("municipality", municipality);
     for (const c of categories) {
@@ -231,7 +233,7 @@ export function LotsPage() {
     void load(query);
   }, [searchParams]);
 
-  function handleSubmit(event: React.FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setSearchParams(draftToSearchParams(0, sort), { replace: true });
   }
@@ -258,28 +260,18 @@ export function LotsPage() {
         {!isLoading && total > 0 ? ` · записи ${pageFrom}—${pageTo}` : ""}
       </p>
 
-      <form className="filters filters--grid" onSubmit={handleSubmit}>
-        {regionAsSelect ? (
-          <label className="filters__field">
-            <span className="filters__facet-label">Регион</span>
-            <select className="filters__select" value={region} onChange={(e) => setRegion(e.target.value)}>
-              <option value="">Все</option>
-              {regionOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
+      <form className="filters lots-filters" onSubmit={handleSubmit}>
+        <label className="filters__field lots-filters__field--region">
+          <span className="filters__facet-label">Регион</span>
           <input
             value={region}
             onChange={(e) => setRegion(e.target.value)}
-            placeholder="Регион (код, например 72)"
+            placeholder="Коды через запятую: 72, 86"
           />
-        )}
+        </label>
+
         {municipalityAsSelect ? (
-          <label className="filters__field">
+          <label className="filters__field lots-filters__field--municipality">
             <span className="filters__facet-label">Муниципалитет</span>
             <select className="filters__select" value={municipality} onChange={(e) => setMunicipality(e.target.value)}>
               <option value="">Все</option>
@@ -291,14 +283,18 @@ export function LotsPage() {
             </select>
           </label>
         ) : (
-          <input
-            value={municipality}
-            onChange={(e) => setMunicipality(e.target.value)}
-            placeholder="Муниципалитет"
-          />
+          <label className="filters__field lots-filters__field--municipality">
+            <span className="filters__facet-label">Муниципалитет</span>
+            <input
+              value={municipality}
+              onChange={(e) => setMunicipality(e.target.value)}
+              placeholder="Название муниципалитета"
+            />
+          </label>
         )}
+
         {statusAsSelect ? (
-          <label className="filters__field">
+          <label className="filters__field lots-filters__field--status">
             <span className="filters__facet-label">Тип документа</span>
             <select className="filters__select" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="">Все</option>
@@ -310,47 +306,54 @@ export function LotsPage() {
             </select>
           </label>
         ) : (
-          <input
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            placeholder="Тип документа (код documentType)"
-          />
+          <label className="filters__field lots-filters__field--status">
+            <span className="filters__facet-label">Тип документа</span>
+            <input value={status} onChange={(e) => setStatus(e.target.value)} placeholder="Код documentType" />
+          </label>
         )}
+
         {categoryOptions.length > 0 && (
-          <FacetMultiPicker
-            label="Вид торгов"
-            options={categoryOptions}
-            value={categories}
-            onChange={setCategories}
-          />
+          <div className="lots-filters__field--category">
+            <FacetMultiPicker
+              label="Вид торгов"
+              options={categoryOptions}
+              value={categories}
+              onChange={setCategories}
+            />
+          </div>
         )}
-        <input value={cadastral} onChange={(e) => setCadastral(e.target.value)} placeholder="Кадастровый номер (часть)" />
-        <input
-          value={minArea}
-          onChange={(e) => setMinArea(e.target.value)}
-          placeholder="Площадь от, м²"
-          type="number"
-          min={0}
-        />
-        <input
-          value={maxArea}
-          onChange={(e) => setMaxArea(e.target.value)}
-          placeholder="Площадь до, м²"
-          type="number"
-          min={0}
-        />
-        <input
-          value={maxStartPrice}
-          onChange={(e) => setMaxStartPrice(e.target.value)}
-          placeholder="Макс. стартовая цена, ₽"
-          type="number"
-          min={0}
-        />
-        <label className="checkbox">
-          <input type="checkbox" checked={isIzhs} onChange={(e) => setIsIzhs(e.target.checked)} />
-          <span>Только ИЖС</span>
+
+        <label className="filters__field lots-filters__field--cadastral">
+          <span className="filters__facet-label">Кадастр</span>
+          <input value={cadastral} onChange={(e) => setCadastral(e.target.value)} placeholder="Номер или часть номера" />
         </label>
-        <div className="quick-filters">
+
+        <label className="filters__field lots-filters__field--area">
+          <span className="filters__facet-label">Площадь от, м²</span>
+          <input value={minArea} onChange={(e) => setMinArea(e.target.value)} placeholder="От" type="number" min={0} />
+        </label>
+
+        <label className="filters__field lots-filters__field--area">
+          <span className="filters__facet-label">Площадь до, м²</span>
+          <input value={maxArea} onChange={(e) => setMaxArea(e.target.value)} placeholder="До" type="number" min={0} />
+        </label>
+
+        <label className="filters__field lots-filters__field--price">
+          <span className="filters__facet-label">Макс. цена</span>
+          <input
+            value={maxStartPrice}
+            onChange={(e) => setMaxStartPrice(e.target.value)}
+            placeholder="Стартовая цена, ₽"
+            type="number"
+            min={0}
+          />
+        </label>
+
+        <div className="quick-filters lots-filters__quick">
+          <label className="checkbox">
+            <input type="checkbox" checked={isIzhs} onChange={(e) => setIsIzhs(e.target.checked)} />
+            <span>Только ИЖС</span>
+          </label>
           <label className="checkbox">
             <input type="checkbox" checked={hasCadastral} onChange={(e) => setHasCadastral(e.target.checked)} />
             <span>С кадастром</span>
@@ -372,7 +375,8 @@ export function LotsPage() {
             <span>С дисконтом</span>
           </label>
         </div>
-        <label className="filters__field">
+
+        <label className="filters__field lots-filters__field--sort">
           <span className="filters__facet-label">Сортировка</span>
           <select
             className="filters__select"
@@ -385,13 +389,16 @@ export function LotsPage() {
           >
             <option value="updated_at_desc">По дате обновления</option>
             <option value="discount_to_baseline_desc">По дисконту к baseline</option>
-            <option value="price_per_sotka_asc">Старт. цена за сотку (дешевле первые)</option>
-            <option value="price_per_sotka_desc">Старт. цена за сотку (дороже первые)</option>
+            <option value="price_per_sotka_asc">Старт. цена за сотку: дешевле первые</option>
+            <option value="price_per_sotka_desc">Старт. цена за сотку: дороже первые</option>
           </select>
         </label>
-        <div className="filters__actions">
+
+        <div className="filters__actions lots-filters__actions">
           <button type="submit">Применить</button>
-          <button type="button" className="button button--ghost" onClick={handleReset}>Сбросить</button>
+          <button type="button" className="button button--ghost" onClick={handleReset}>
+            Сбросить
+          </button>
           <a className="button button--ghost" href={exportUrl} download="lots_export.csv">
             Скачать CSV
           </a>

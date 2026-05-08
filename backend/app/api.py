@@ -56,10 +56,17 @@ class LotValuation:
     valuation_reason: str | None = None
 
 
-def _normalize_str_list(values: list[str] | None) -> list[str] | None:
+def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     if not values:
         return None
-    cleaned = [v.strip() for v in values if v and v.strip()]
+    raw_values = [values] if isinstance(values, str) else values
+    cleaned = [
+        item.strip()
+        for value in raw_values
+        if value
+        for item in value.split(",")
+        if item.strip()
+    ]
     return cleaned or None
 
 
@@ -231,7 +238,7 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
 
 
 def _lot_filters(
-    region: str | None,
+    region: str | list[str] | None,
     status: str | None,
     municipality: str | None,
     category: list[str] | None,
@@ -244,8 +251,9 @@ def _lot_filters(
     has_price_per_sotka: bool | None = None,
 ) -> list:
     filters: list = []
-    if region:
-        filters.append(Lot.region == region)
+    regions = _normalize_str_list(region)
+    if regions:
+        filters.append(Lot.region.in_(regions))
     if status:
         filters.append(Lot.status == status)
     if municipality:
@@ -301,7 +309,7 @@ def _lots_select_ordered(sort: LotsSort):
 
 @router.get("/lots", response_model=LotListPage)
 def list_lots(
-    region: str | None = None,
+    region: list[str] | None = Query(default=None),
     status: str | None = None,
     municipality: str | None = None,
     category: list[str] | None = Query(default=None),
@@ -380,7 +388,7 @@ def list_lots(
 
 @router.get("/export/lots.csv")
 def export_lots_csv(
-    region: str | None = None,
+    region: list[str] | None = Query(default=None),
     status: str | None = None,
     municipality: str | None = None,
     category: list[str] | None = Query(default=None),

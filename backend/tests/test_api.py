@@ -130,6 +130,12 @@ def test_lots_filters_izhs_and_area():
     single_cat = client.get("/api/lots", params={"category": "ZK"}).json()["items"]
     assert [item["source_id"] for item in single_cat] == ["lot-izhs"]
 
+    by_regions_csv = client.get("/api/lots", params={"region": "72,77"}).json()["items"]
+    assert {item["source_id"] for item in by_regions_csv} == {"lot-izhs", "lot-other"}
+
+    by_regions_repeated = client.get("/api/lots", params=[("region", "72"), ("region", "77")]).json()["items"]
+    assert {item["source_id"] for item in by_regions_repeated} == {"lot-izhs", "lot-other"}
+
     izhs_row = next(i for i in only_izhs if i["source_id"] == "lot-izhs")
     assert izhs_row["municipality"] == "г.о. город Тюмень"
     assert izhs_row["start_price_per_sqm"] is not None
@@ -162,6 +168,11 @@ def test_lots_filters_izhs_and_area():
     assert csv_categories.status_code == 200
     assert "lot-izhs" in csv_categories.text
     assert "lot-other" in csv_categories.text
+
+    csv_regions = client.get("/api/export/lots.csv", params={"region": "72,77"})
+    assert csv_regions.status_code == 200
+    assert "lot-izhs" in csv_regions.text
+    assert "lot-other" in csv_regions.text
 
 
 def test_lots_return_baseline_valuation_and_discount_sort():

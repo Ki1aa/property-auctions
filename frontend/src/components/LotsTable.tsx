@@ -41,51 +41,62 @@ export function LotsTable({ lots }: Props) {
     return <p className="empty">Лотов по фильтрам не найдено.</p>;
   }
   return (
-    <table className="table">
+    <table className="table lots-table">
       <thead>
         <tr>
-          <th>Название</th>
-          <th>Статус</th>
-          <th>Регион</th>
-          <th>Муниципалитет</th>
-          <th>Площадь</th>
-          <th>Кадастр</th>
-          <th>Текущая цена</th>
-          <th className="cell--hint" title="Стартовая цена за сотку (100 м²) по данным извещения, не оценка рынка">
-            ₽/сотка
-          </th>
-          <th className="cell--hint" title="Медиана ₽/сотка по уже загруженным торгам, не внешняя рыночная оценка">
-            Baseline
-          </th>
-          <th className="cell--hint" title="Положительное значение означает цену ниже внутреннего baseline">
-            Дисконт
-          </th>
-          <th>Уверенность</th>
-          <th>Дата окончания</th>
+          <th className="lots-table__lot-col">Лот</th>
+          <th className="lots-table__status-col">Статус / регион</th>
+          <th className="lots-table__area-col">Площадь</th>
+          <th className="lots-table__price-col">Цена</th>
+          <th className="lots-table__baseline-col">Baseline</th>
+          <th className="lots-table__confidence-col">Уверенность</th>
+          <th className="lots-table__date-col">Окончание</th>
         </tr>
       </thead>
       <tbody>
-        {lots.map((lot) => (
-          <tr key={lot.id}>
-            <td className="cell--name">
-              <Link to={`/lots/${lot.id}`}>{lot.title}</Link>
-              {lot.is_izhs_candidate && <span className="badge badge--success">ИЖС</span>}
-            </td>
-            <td><StatusBadge status={lot.status} /></td>
-            <td>{lot.region || "—"}</td>
-            <td>{lot.municipality || lot.settlement || "—"}</td>
-            <td>{formatArea(lot.area_sqm)}</td>
-            <td className="cell--mono">{lot.cadastral_number || "—"}</td>
-            <td className="cell--num">{formatPrice(lot.current_price ?? lot.start_price)}</td>
-            <td className="cell--num">{formatPrice(lot.start_price_per_sotka)}</td>
-            <td className="cell--num">{formatPrice(lot.baseline_price_per_sotka)}</td>
-            <td className={lot.discount_to_baseline && lot.discount_to_baseline > 0 ? "cell--num cell--good" : "cell--num"}>
-              {formatPercent(lot.discount_to_baseline)}
-            </td>
-            <td title={lot.valuation_reason ?? undefined}>{confidenceLabel(lot.valuation_confidence)}</td>
-            <td className="cell--nowrap">{formatDate(lot.end_date)}</td>
-          </tr>
-        ))}
+        {lots.map((lot) => {
+          const discountClass =
+            lot.discount_to_baseline && lot.discount_to_baseline > 0
+              ? "lots-table__subvalue lots-table__discount lots-table__discount--good"
+              : "lots-table__subvalue lots-table__discount";
+          return (
+            <tr key={lot.id}>
+              <td className="lots-table__lot-cell">
+                <div className="lots-table__title-row">
+                  <Link to={`/lots/${lot.id}`}>{lot.title}</Link>
+                  {lot.is_izhs_candidate && <span className="badge badge--success">ИЖС</span>}
+                </div>
+                <div className="lots-table__meta">Кадастр: {lot.cadastral_number || "—"}</div>
+              </td>
+              <td>
+                <StatusBadge status={lot.status} />
+                <div className="lots-table__meta">Регион: {lot.region || "—"}</div>
+                <div className="lots-table__meta">{lot.municipality || lot.settlement || "—"}</div>
+              </td>
+              <td className="cell--nowrap">{formatArea(lot.area_sqm)}</td>
+              <td className="cell--num">
+                <div className="lots-table__value">{formatPrice(lot.current_price ?? lot.start_price)}</div>
+                <div
+                  className="lots-table__subvalue"
+                  title="Стартовая цена за сотку (100 м²) по данным извещения"
+                >
+                  {formatPrice(lot.start_price_per_sotka)} / сотка
+                </div>
+              </td>
+              <td className="cell--num">
+                <div className="lots-table__value">{formatPrice(lot.baseline_price_per_sotka)}</div>
+                <div
+                  className={discountClass}
+                  title="Положительное значение означает цену ниже внутреннего baseline"
+                >
+                  {formatPercent(lot.discount_to_baseline)}
+                </div>
+              </td>
+              <td title={lot.valuation_reason ?? undefined}>{confidenceLabel(lot.valuation_confidence)}</td>
+              <td className="cell--nowrap">{formatDate(lot.end_date)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

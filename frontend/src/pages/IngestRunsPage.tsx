@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { fetchIngestRuns, fetchIngestStatus, startIngestNow } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import { IngestRun, IngestStatus } from "../types";
@@ -43,10 +43,10 @@ function shortUrl(value: string | null): string {
   try {
     const url = new URL(value);
     const path = `${url.pathname}${url.search}`;
-    const shortenedPath = path.length > 46 ? `${path.slice(0, 43)}…` : path;
+    const shortenedPath = path.length > 76 ? `${path.slice(0, 73)}…` : path;
     return `${url.host}${shortenedPath}`;
   } catch {
-    return value.length > 56 ? `${value.slice(0, 53)}…` : value;
+    return value.length > 86 ? `${value.slice(0, 83)}…` : value;
   }
 }
 
@@ -56,7 +56,7 @@ function friendlyError(run: IngestRun): { text: string; title?: string } {
   const m = message.trim();
   if (run.error_kind === "source_unavailable") {
     return {
-      text: "Источник временно не отдал часть файлов (срез еще не опубликован/недоступен). Попробуйте позже.",
+      text: "Источник временно не отдал часть файлов: срез ещё не опубликован или недоступен. Попробуйте позже.",
       title: m,
     };
   }
@@ -69,9 +69,15 @@ function friendlyError(run: IngestRun): { text: string; title?: string } {
   return { text: m };
 }
 
+function errorKindLabel(run: IngestRun): string {
+  if (!run.error_kind) return run.error_message ? "Есть ошибка" : "—";
+  return errorKindLabels[run.error_kind] ?? run.error_kind;
+}
+
 export function IngestRunsPage() {
   const [runs, setRuns] = useState<IngestRun[]>([]);
   const [status, setStatus] = useState<IngestStatus | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [startMessage, setStartMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -104,6 +110,10 @@ export function IngestRunsPage() {
     } finally {
       setIsStarting(false);
     }
+  }
+
+  function toggleRunDetails(runId: number) {
+    setExpandedRunId((current) => (current === runId ? null : runId));
   }
 
   useEffect(() => {
@@ -170,9 +180,7 @@ export function IngestRunsPage() {
       </section>
 
       <p className="help-text">
-        Загрузка не идёт постоянно: планировщик запускает ingest по расписанию, а кнопка выше запускает такой же
-        operational-проход вручную. Если источник недоступен или вернул новый формат, это появится в последней строке
-        истории как тип сбоя и сообщение.
+        Ручной запуск выполняет обычный operational-проход; подробности ошибок открываются в строках истории.
       </p>
 
       {isLoading ? (
@@ -180,56 +188,106 @@ export function IngestRunsPage() {
       ) : runs.length === 0 ? (
         <p className="empty">Запусков пока не было.</p>
       ) : (
-        <table className="table">
+        <table className="table table--compact ingest-runs-table">
           <thead>
             <tr>
-              <th className="cell--num">#</th>
-              <th>Статус</th>
-              <th className="cell--nowrap">Старт</th>
-              <th className="cell--nowrap">Финиш</th>
-              <th className="cell--num">Длительность</th>
-              <th className="cell--num">Получено</th>
-              <th className="cell--num">Сохранено</th>
-              <th className="cell--num">Изменено</th>
-              <th className="cell--num">Файлы</th>
-              <th>Тип сбоя</th>
-              <th className="ingest-runs__url-col">Последний URL ошибки</th>
-              <th className="ingest-runs__error-col">Ошибка</th>
+              <th className="cell--num ingest-runs-table__id">#</th>
+              <th className="ingest-runs-table__status">Статус</th>
+              <th className="cell--nowrap ingest-runs-table__started">Старт</th>
+              <th className="cell--num ingest-runs-table__duration">Длительность</th>
+              <th className="cell--num ingest-runs-table__count">Получено</th>
+              <th className="cell--num ingest-runs-table__count">Сохранено</th>
+              <th className="cell--num ingest-runs-table__count">Изменено</th>
+              <th className="cell--num ingest-runs-table__files">Файлы</th>
+              <th className="ingest-runs-table__failure">Сбой</th>
+              <th className="ingest-runs-table__details">Детали</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((run) => {
+              const isExpanded = expandedRunId === run.id;
               const err = friendlyError(run);
-              const errorKindLabel = run.error_kind ? errorKindLabels[run.error_kind] ?? run.error_kind : "—";
+              const detailRowId = `ingest-run-${run.id}-details`;
+              const failureLabel = errorKindLabel(run);
               return (
-                <tr key={run.id}>
-                  <td className="cell--num">{run.id}</td>
-                  <td>
-                    <StatusBadge status={run.status} variant="ingest" />
-                  </td>
-                  <td className="cell--nowrap">{formatDate(run.started_at)}</td>
-                  <td className="cell--nowrap">{formatDate(run.finished_at)}</td>
-                  <td className="cell--num">{durationMs(run.started_at, run.finished_at)}</td>
-                  <td className="cell--num">{run.fetched_count}</td>
-                  <td className="cell--num">{run.upserted_count}</td>
-                  <td className="cell--num">{run.changed_count}</td>
-                  <td className="cell--num" title="Обработано / с ошибкой">
-                    {run.processed_files} / {run.failed_files}
-                  </td>
-                  <td>{errorKindLabel}</td>
-                  <td className="cell--mono ingest-runs__url-col" title={run.last_error_source_url ?? undefined}>
-                    {run.last_error_source_url ? (
-                      <a href={run.last_error_source_url} target="_blank" rel="noreferrer">
-                        {shortUrl(run.last_error_source_url)}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="cell--error ingest-runs__error-col" title={err.title ?? undefined}>
-                    {err.text}
-                  </td>
-                </tr>
+                <Fragment key={run.id}>
+                  <tr className={isExpanded ? "ingest-runs-table__row ingest-runs-table__row--expanded" : "ingest-runs-table__row"}>
+                    <td className="cell--num">{run.id}</td>
+                    <td>
+                      <StatusBadge status={run.status} variant="ingest" />
+                    </td>
+                    <td className="cell--nowrap">{formatDate(run.started_at)}</td>
+                    <td className="cell--num">{durationMs(run.started_at, run.finished_at)}</td>
+                    <td className="cell--num">{run.fetched_count}</td>
+                    <td className="cell--num">{run.upserted_count}</td>
+                    <td className="cell--num">{run.changed_count}</td>
+                    <td className="cell--num" title="Обработано / с ошибкой">
+                      {run.processed_files} / {run.failed_files}
+                    </td>
+                    <td className="ingest-runs-table__failure-cell" title={failureLabel}>
+                      {failureLabel}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="button button--ghost button--compact ingest-runs-table__details-button"
+                        aria-expanded={isExpanded}
+                        aria-controls={detailRowId}
+                        onClick={() => toggleRunDetails(run.id)}
+                      >
+                        {isExpanded ? "Скрыть" : "Детали"}
+                      </button>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr id={detailRowId} className="ingest-runs-table__details-row">
+                      <td colSpan={10}>
+                        <div className="ingest-run-details">
+                          <div className="ingest-run-details__grid">
+                            <div>
+                              <span>Финиш</span>
+                              <strong>{formatDate(run.finished_at)}</strong>
+                            </div>
+                            <div>
+                              <span>Тип сбоя</span>
+                              <strong>{failureLabel}</strong>
+                            </div>
+                            <div>
+                              <span>Файлы</span>
+                              <strong>
+                                {run.processed_files} обработано / {run.failed_files} с ошибкой
+                              </strong>
+                            </div>
+                          </div>
+
+                          {run.last_error_source_url && (
+                            <div className="ingest-run-details__block">
+                              <span>Последний URL ошибки</span>
+                              <a
+                                className="cell--mono ingest-run-details__url"
+                                href={run.last_error_source_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={run.last_error_source_url}
+                              >
+                                {shortUrl(run.last_error_source_url)}
+                              </a>
+                            </div>
+                          )}
+
+                          {err.text !== "—" && (
+                            <div className="ingest-run-details__block">
+                              <span>Ошибка</span>
+                              <p className="ingest-run-details__error" title={err.title ?? undefined}>
+                                {err.text}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

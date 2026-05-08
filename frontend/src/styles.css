@@ -367,7 +367,8 @@ h2 {
 
 input,
 select,
-button {
+button,
+.button {
   font-family: inherit;
   font-size: 14px;
 }
@@ -404,7 +405,12 @@ select:focus {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
-button {
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
   padding: 9px 16px;
   border-radius: 8px;
   border: none;
@@ -413,10 +419,15 @@ button {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
 }
 
-button:hover:not(:disabled) {
+button:hover:not(:disabled),
+a.button:hover {
   background: var(--primary-hover);
+  text-decoration: none;
 }
 
 button:disabled {
@@ -434,6 +445,10 @@ button:disabled {
   background: var(--primary-soft);
 }
 
+a.button--ghost:hover {
+  background: var(--primary-soft);
+}
+
 /* Tables */
 .table {
   width: 100%;
@@ -442,6 +457,15 @@ button:disabled {
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
+}
+
+.table--compact {
+  table-layout: fixed;
+}
+
+.table--compact th,
+.table--compact td {
+  padding: 10px 12px;
 }
 
 th,
@@ -508,20 +532,253 @@ tr:hover td {
   margin-left: 8px;
 }
 
-.ingest-runs__error-col {
-  width: 360px;
-  max-width: min(360px, 45vw);
-}
-
-.ingest-runs__url-col {
-  width: 280px;
-  max-width: min(280px, 36vw);
-  overflow-wrap: anywhere;
-}
-
 .cell--mono {
   font-family: ui-monospace, SFMono-Regular, "Menlo", Consolas, monospace;
   font-size: 13px;
+}
+
+.lots-filters {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px 10px;
+  align-items: end;
+}
+
+.lots-filters .filters__field,
+.lots-filters .facet-picker {
+  min-width: 0;
+}
+
+.lots-filters input,
+.lots-filters select,
+.lots-filters .facet-picker__trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.lots-filters__field--region {
+  grid-column: span 3;
+}
+
+.lots-filters__field--municipality {
+  grid-column: span 3;
+}
+
+.lots-filters__field--status {
+  grid-column: span 2;
+}
+
+.lots-filters__field--category {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+.lots-filters__field--category > .filters__field {
+  width: 100%;
+}
+
+.lots-filters__field--cadastral {
+  grid-column: span 2;
+}
+
+.lots-filters__field--area {
+  grid-column: span 2;
+}
+
+.lots-filters__field--price {
+  grid-column: span 3;
+}
+
+.lots-filters__quick {
+  grid-column: span 5;
+  align-self: center;
+  padding: 0;
+}
+
+.lots-filters__field--sort {
+  grid-column: span 4;
+}
+
+.lots-filters__actions {
+  grid-column: span 8;
+  justify-content: flex-end;
+  align-self: end;
+}
+
+.lots-table {
+  table-layout: fixed;
+  min-width: 960px;
+}
+
+.lots-table th,
+.lots-table td {
+  vertical-align: top;
+}
+
+.lots-table__lot-col {
+  width: 32%;
+}
+
+.lots-table__status-col {
+  width: 16%;
+}
+
+.lots-table__area-col {
+  width: 9%;
+}
+
+.lots-table__price-col {
+  width: 13%;
+}
+
+.lots-table__baseline-col {
+  width: 12%;
+}
+
+.lots-table__confidence-col {
+  width: 10%;
+}
+
+.lots-table__date-col {
+  width: 8%;
+}
+
+.lots-table__lot-cell {
+  min-width: 0;
+}
+
+.lots-table__title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lots-table__title-row a {
+  min-width: 0;
+  color: var(--primary);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.lots-table__title-row .badge {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.lots-table__meta,
+.lots-table__subvalue {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.lots-table__value {
+  font-weight: 600;
+}
+
+.lots-table__discount--good {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.ingest-runs-table__id {
+  width: 48px;
+}
+
+.ingest-runs-table__status {
+  width: 126px;
+}
+
+.ingest-runs-table__started {
+  width: 168px;
+}
+
+.ingest-runs-table__duration {
+  width: 108px;
+}
+
+.ingest-runs-table__count {
+  width: 92px;
+}
+
+.ingest-runs-table__files {
+  width: 82px;
+}
+
+.ingest-runs-table__details {
+  width: 96px;
+}
+
+.ingest-runs-table__failure-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-runs-table__details-button {
+  width: 72px;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.ingest-runs-table__row--expanded td {
+  background: #fbfcff;
+  border-bottom-color: transparent;
+}
+
+.ingest-runs-table__details-row > td {
+  padding: 0;
+  background: #fbfcff;
+}
+
+.ingest-run-details {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 18px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ingest-run-details__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 18px;
+}
+
+.ingest-run-details__grid > div,
+.ingest-run-details__block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ingest-run-details span {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ingest-run-details strong {
+  font-size: 14px;
+}
+
+.ingest-run-details__url {
+  overflow-wrap: anywhere;
+}
+
+.ingest-run-details__error {
+  margin: 0;
+  color: var(--error);
+  font-size: 14px;
+  max-width: 900px;
+  overflow-wrap: anywhere;
 }
 
 /* Raw notice JSON viewer (collapsible) */
@@ -824,6 +1081,28 @@ tr:hover td {
   margin: 0 0 16px;
 }
 
+@media (max-width: 980px) {
+  .lots-filters {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .lots-filters__field--region,
+  .lots-filters__field--municipality,
+  .lots-filters__field--status,
+  .lots-filters__field--category,
+  .lots-filters__field--cadastral,
+  .lots-filters__field--price,
+  .lots-filters__field--sort {
+    grid-column: span 3;
+  }
+  .lots-filters__field--area {
+    grid-column: span 2;
+  }
+  .lots-filters__quick,
+  .lots-filters__actions {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 720px) {
   .header__inner {
     flex-direction: column;
@@ -838,5 +1117,23 @@ tr:hover td {
   .table {
     display: block;
     overflow-x: auto;
+  }
+  .lots-filters {
+    grid-template-columns: 1fr;
+  }
+  .lots-filters__field--region,
+  .lots-filters__field--municipality,
+  .lots-filters__field--status,
+  .lots-filters__field--category,
+  .lots-filters__field--cadastral,
+  .lots-filters__field--area,
+  .lots-filters__field--price,
+  .lots-filters__quick,
+  .lots-filters__field--sort,
+  .lots-filters__actions {
+    grid-column: 1 / -1;
+  }
+  .lots-filters__actions {
+    justify-content: flex-start;
   }
 }
