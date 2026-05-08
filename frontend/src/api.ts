@@ -9,6 +9,7 @@ import {
   MapPoint,
   ManualIngestStartResponse,
   NoticeListPage,
+  NoticeSort,
   OpenDataNoticeFacets,
 } from "./types";
 
@@ -112,6 +113,7 @@ export function fetchNotices(params: {
   documentType?: string[];
   biddTypeCode?: string[];
   regNum?: string;
+  sort?: NoticeSort;
   limit?: number;
   offset?: number;
 }): Promise<NoticeListPage> {
@@ -119,6 +121,7 @@ export function fetchNotices(params: {
     document_type: params.documentType,
     bidd_type_code: params.biddTypeCode,
     reg_num: params.regNum,
+    sort: params.sort,
     limit: params.limit,
     offset: params.offset,
   });

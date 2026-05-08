@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -127,6 +127,12 @@ class AlertEvent(Base):
 
 class OpenDataNotice(Base):
     __tablename__ = "opendata_notices"
+    __table_args__ = (
+        Index("ix_opendata_notices_reg_num_id", "reg_num", "id"),
+        Index("ix_opendata_notices_document_type_id", "document_type", "id"),
+        Index("ix_opendata_notices_bidd_type_code_id", "bidd_type_code", "id"),
+        Index("ix_opendata_notices_publish_date_id", "publish_date", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     reg_num: Mapped[str] = mapped_column(String(64), index=True)

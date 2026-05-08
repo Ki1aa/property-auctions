@@ -406,6 +406,33 @@ def test_opendata_notices_multi_filter_and_facets():
     assert first_page["items"][0]["reg_num"] == "r2"
     assert second_page["items"][0]["reg_num"] == "r1"
 
+    by_publish_date_asc = client.get(
+        "/api/opendata-notices",
+        params={"sort": "publish_date_asc"},
+    ).json()["items"]
+    assert [item["reg_num"] for item in by_publish_date_asc] == ["r1", "r2"]
+
+    by_reg_num_desc = client.get(
+        "/api/opendata-notices",
+        params={"sort": "reg_num_desc"},
+    ).json()["items"]
+    assert [item["reg_num"] for item in by_reg_num_desc] == ["r2", "r1"]
+
+    by_document_type_asc = client.get(
+        "/api/opendata-notices",
+        params={"sort": "document_type_asc"},
+    ).json()["items"]
+    assert [item["document_type"] for item in by_document_type_asc] == ["notice", "protocol"]
+
+    by_bidd_type_asc = client.get(
+        "/api/opendata-notices",
+        params={"sort": "bidd_type_code_asc"},
+    ).json()["items"]
+    assert [item["bidd_type_code"] for item in by_bidd_type_asc] == ["178FZ", "ZK"]
+
+    invalid_sort = client.get("/api/opendata-notices", params={"sort": "href_asc"})
+    assert invalid_sort.status_code == 422
+
 
 def test_lot_detail_returns_notice_payload_when_linked():
     from sqlalchemy import select

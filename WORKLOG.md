@@ -6,6 +6,57 @@
 
 ---
 
+## 2026-05-08 - Сортировка извещений и выравнивание фильтров
+
+**Что сделано:**
+- На странице `/notices` выровнены фильтры: поле `Реестровый номер` теперь имеет такую же подпись и вертикальное выравнивание, как `Тип документа` и `Вид торгов`.
+- Добавлена серверная сортировка извещений через параметр `sort`:
+  - `publish_date_desc` / `publish_date_asc`;
+  - `reg_num_asc` / `reg_num_desc`;
+  - `document_type_asc` / `document_type_desc`;
+  - `bidd_type_code_asc` / `bidd_type_code_desc`.
+- Заголовки таблицы `/notices` стали кликабельными для сортировки по реестровому номеру, типу документа, виду торгов и дате публикации; повторный клик меняет направление.
+- Сортировка сделана на backend, чтобы сортировать весь набор данных, а не только текущие 50 строк страницы.
+- Для стабильной пагинации backend всегда добавляет вторичную сортировку по `id`.
+- Добавлены составные индексы `opendata_notices(..., id)` для сортируемых колонок:
+  - `ix_opendata_notices_publish_date_id`;
+  - `ix_opendata_notices_reg_num_id`;
+  - `ix_opendata_notices_document_type_id`;
+  - `ix_opendata_notices_bidd_type_code_id`.
+- Добавлена Alembic-ревизия `20260508_08_add_opendata_notice_sort_indexes.py`.
+- Запущен `python scripts/dev_sync_schema.py`, существующая dev SQLite получила новые индексы.
+- Обновлены README/AGENTS с новым контрактом сортировки `/api/opendata-notices`.
+
+**Затронутые файлы:**
+- backend/app/api.py
+- backend/app/models.py
+- backend/alembic/versions/20260508_08_add_opendata_notice_sort_indexes.py
+- backend/tests/test_api.py
+- frontend/src/api.ts
+- frontend/src/types.ts
+- frontend/src/pages/TradesPage.tsx
+- frontend/src/pages/TradesPage.test.tsx
+- frontend/src/components/TradesTable.tsx
+- frontend/src/styles.css
+- README.md
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `python scripts/dev_sync_schema.py` в `backend/`: созданы 4 новых индекса.
+- `$env:PYTHONPATH='.'; python -m pytest` в `backend/`: 55 passed.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 3 passed.
+- `npm.cmd run build` в `frontend/`: прошло; остаётся известное предупреждение Vite о крупном lazy chunk карты MapLibre.
+- `GET http://localhost:8000/api/opendata-notices?sort=reg_num_asc&limit=3`: 200 OK.
+- `EXPLAIN QUERY PLAN` в SQLite показал использование новых индексов для сортировок `publish_date`, `reg_num`, `document_type`, `bidd_type_code`.
+- В in-app browser открыта `/notices`: фильтры на узком экране складываются корректно, клик по `Реестровый номер` переключил серверную сортировку и показал ожидаемую первую строку.
+
+**Известные проблемы / TODO:**
+- Колонка `Ссылка` не сортируется намеренно: сортировка по URL не несёт практической пользы для пользователя.
+
+---
+
 ## 2026-05-08 - Повторная очистка данных перед проверкой ingest всех регионов
 
 **Что сделано:**

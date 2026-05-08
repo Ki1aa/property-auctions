@@ -14,6 +14,16 @@ export type NoticeListPage = {
   offset: number;
 };
 
+export type NoticeSort =
+  | "publish_date_desc"
+  | "publish_date_asc"
+  | "reg_num_asc"
+  | "reg_num_desc"
+  | "document_type_asc"
+  | "document_type_desc"
+  | "bidd_type_code_asc"
+  | "bidd_type_code_desc";
+
 export type LotsSort =
   | "updated_at_desc"
   | "price_per_sotka_asc"

@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { fetchNotices, fetchOpenDataNoticeFacets } from "../api";
 import { FacetMultiPicker } from "../components/FacetMultiPicker";
 import { TradesTable } from "../components/TradesTable";
-import { Notice, OpenDataNoticeFacets } from "../types";
+import { Notice, NoticeSort, OpenDataNoticeFacets } from "../types";
 
 const PAGE_SIZE = 50;
+const DEFAULT_SORT: NoticeSort = "publish_date_desc";
+
+type NoticeSortField = "reg_num" | "document_type" | "bidd_type_code" | "publish_date";
 
 type NoticeFilters = {
   documentTypes: string[];
@@ -12,10 +15,30 @@ type NoticeFilters = {
   regNum: string;
 };
 
+function sortField(sort: NoticeSort): NoticeSortField {
+  if (sort.startsWith("reg_num_")) return "reg_num";
+  if (sort.startsWith("document_type_")) return "document_type";
+  if (sort.startsWith("bidd_type_code_")) return "bidd_type_code";
+  return "publish_date";
+}
+
+function sortDirection(sort: NoticeSort): "asc" | "desc" {
+  return sort.endsWith("_asc") ? "asc" : "desc";
+}
+
+function nextSortForField(current: NoticeSort, field: NoticeSortField): NoticeSort {
+  if (sortField(current) === field) {
+    const nextDirection = sortDirection(current) === "asc" ? "desc" : "asc";
+    return `${field}_${nextDirection}` as NoticeSort;
+  }
+  return field === "publish_date" ? "publish_date_desc" : (`${field}_asc` as NoticeSort);
+}
+
 export function TradesPage() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [sort, setSort] = useState<NoticeSort>(DEFAULT_SORT);
   const [documentTypes, setDocumentTypes] = useState<string[]>([]);
   const [biddTypeCodes, setBiddTypeCodes] = useState<string[]>([]);
   const [regNum, setRegNum] = useState("");
@@ -33,7 +56,11 @@ export function TradesPage() {
     return Array.from(s).sort();
   }, [facets, biddTypeCodes]);
 
-  async function load(filters: NoticeFilters = { documentTypes, biddTypeCodes, regNum }, nextOffset = offset) {
+  async function load(
+    filters: NoticeFilters = { documentTypes, biddTypeCodes, regNum },
+    nextOffset = offset,
+    nextSort = sort,
+  ) {
     try {
       setError("");
       setIsLoading(true);
@@ -41,6 +68,7 @@ export function TradesPage() {
         documentType: filters.documentTypes.length ? filters.documentTypes : undefined,
         biddTypeCode: filters.biddTypeCodes.length ? filters.biddTypeCodes : undefined,
         regNum: filters.regNum.trim() || undefined,
+        sort: nextSort,
         limit: PAGE_SIZE,
         offset: nextOffset,
       });
@@ -64,9 +92,13 @@ export function TradesPage() {
     void load();
   }, []);
 
-  function handleSubmit(event: React.FormEvent) {
+  function currentFilters(): NoticeFilters {
+    return { documentTypes, biddTypeCodes, regNum };
+  }
+
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    void load({ documentTypes, biddTypeCodes, regNum }, 0);
+    void load(currentFilters(), 0, sort);
   }
 
   function handleReset() {
@@ -74,11 +106,18 @@ export function TradesPage() {
     setDocumentTypes([]);
     setBiddTypeCodes([]);
     setRegNum("");
-    void load(empty, 0);
+    setSort(DEFAULT_SORT);
+    void load(empty, 0, DEFAULT_SORT);
   }
 
   function handlePage(nextOffset: number) {
-    void load(undefined, nextOffset);
+    void load(currentFilters(), nextOffset, sort);
+  }
+
+  function handleSort(field: NoticeSortField) {
+    const nextSort = nextSortForField(sort, field);
+    setSort(nextSort);
+    void load(currentFilters(), 0, nextSort);
   }
 
   const pageFrom = total === 0 ? 0 : offset + 1;
@@ -92,7 +131,7 @@ export function TradesPage() {
         {!isLoading && total > 0 ? ` · записи ${pageFrom}—${pageTo}` : ""}
       </p>
 
-      <form className="filters filters--grid" onSubmit={handleSubmit}>
+      <form className="filters notices-filters" onSubmit={handleSubmit}>
         {docOptions.length > 0 && (
           <FacetMultiPicker
             label="Тип документа"
@@ -109,14 +148,19 @@ export function TradesPage() {
             onChange={setBiddTypeCodes}
           />
         )}
-        <input
-          value={regNum}
-          onChange={(e) => setRegNum(e.target.value)}
-          placeholder="Реестровый номер (точное совпадение)"
-        />
-        <div className="filters__actions">
+        <label className="filters__field">
+          <span className="filters__facet-label">Реестровый номер</span>
+          <input
+            value={regNum}
+            onChange={(e) => setRegNum(e.target.value)}
+            placeholder="Точное совпадение"
+          />
+        </label>
+        <div className="filters__actions notices-filters__actions">
           <button type="submit">Применить</button>
-          <button type="button" className="button button--ghost" onClick={handleReset}>Сбросить</button>
+          <button type="button" className="button button--ghost" onClick={handleReset}>
+            Сбросить
+          </button>
         </div>
       </form>
 
@@ -141,7 +185,7 @@ export function TradesPage() {
           </button>
         </div>
       ) : null}
-      {isLoading ? <p className="loading">Загрузка…</p> : <TradesTable notices={notices} />}
+      {isLoading ? <p className="loading">Загрузка…</p> : <TradesTable notices={notices} sort={sort} onSort={handleSort} />}
     </div>
   );
 }

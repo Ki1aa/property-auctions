@@ -38,6 +38,17 @@ LotsSort = Literal[
     "discount_to_baseline_desc",
 ]
 
+NoticeSort = Literal[
+    "publish_date_desc",
+    "publish_date_asc",
+    "reg_num_asc",
+    "reg_num_desc",
+    "document_type_asc",
+    "document_type_desc",
+    "bidd_type_code_asc",
+    "bidd_type_code_desc",
+]
+
 
 @dataclass(frozen=True)
 class BaselineStats:
@@ -305,6 +316,20 @@ def _lots_select_ordered(sort: LotsSort):
     else:
         stmt = stmt.order_by(desc(Lot.updated_at))
     return stmt
+
+
+def _opendata_notice_order(sort: NoticeSort):
+    sortable_columns = {
+        "publish_date": OpenDataNotice.publish_date,
+        "reg_num": OpenDataNotice.reg_num,
+        "document_type": OpenDataNotice.document_type,
+        "bidd_type_code": OpenDataNotice.bidd_type_code,
+    }
+    field, direction = sort.rsplit("_", 1)
+    column = sortable_columns[field]
+    if direction == "asc":
+        return column.asc(), OpenDataNotice.id.asc()
+    return column.desc(), OpenDataNotice.id.desc()
 
 
 @router.get("/lots", response_model=LotListPage)
@@ -706,6 +731,7 @@ def list_opendata_notices(
     document_type: list[str] | None = Query(default=None),
     bidd_type_code: list[str] | None = Query(default=None),
     reg_num: str | None = None,
+    sort: NoticeSort = "publish_date_desc",
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -725,7 +751,7 @@ def list_opendata_notices(
         total_stmt = total_stmt.where(and_(*filters))
     total = int(db.scalar(total_stmt) or 0)
 
-    stmt = select(OpenDataNotice).order_by(desc(OpenDataNotice.publish_date)).offset(offset).limit(limit)
+    stmt = select(OpenDataNotice).order_by(*_opendata_notice_order(sort)).offset(offset).limit(limit)
     if filters:
         stmt = stmt.where(and_(*filters))
 

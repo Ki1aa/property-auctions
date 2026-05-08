@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TradesPage } from "./TradesPage";
 
@@ -15,11 +15,20 @@ function jsonResponse(data: unknown): Response {
 }
 
 function parseUrl(url: string): URL {
-  // api.ts always builds absolute URL like http://localhost:8000/...
   return new URL(url);
 }
 
+function noticeCalls(): FetchCall[] {
+  const calls = (globalThis as unknown as { __fetchCalls: FetchCall[] }).__fetchCalls;
+  return calls.filter((c) => parseUrl(c.url).pathname.endsWith("/api/opendata-notices"));
+}
+
 describe("TradesPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     const calls: FetchCall[] = [];
     vi.stubGlobal(
@@ -34,8 +43,17 @@ describe("TradesPage", () => {
         }
         if (u.pathname.endsWith("/api/opendata-notices")) {
           return jsonResponse({
-            items: [],
-            total: 0,
+            items: [
+              {
+                id: 1,
+                reg_num: "23000012770000000082",
+                document_type: "notice",
+                publish_date: "2026-05-07T23:50:49",
+                bidd_type_code: "ZK",
+                href: "https://example.com/notice.json",
+              },
+            ],
+            total: 1,
             limit: Number(u.searchParams.get("limit") ?? 0),
             offset: Number(u.searchParams.get("offset") ?? 0),
           });
@@ -44,37 +62,62 @@ describe("TradesPage", () => {
       }) as unknown as typeof fetch,
     );
 
-    // helper for test access
     (globalThis as unknown as { __fetchCalls: FetchCall[] }).__fetchCalls = calls;
   });
 
-  it("reset sends empty filters and offset=0", async () => {
+  it("reset sends empty filters, default sort and offset=0", async () => {
     render(
       <MemoryRouter>
         <TradesPage />
       </MemoryRouter>,
     );
 
-    // Wait until initial load finished (page subtitle switches from loading)
     await screen.findByText(/Найдено:/);
 
-    fireEvent.change(screen.getByPlaceholderText("Реестровый номер (точное совпадение)"), {
+    fireEvent.change(screen.getByPlaceholderText("Точное совпадение"), {
       target: { value: "123" },
     });
     fireEvent.click(screen.getByText("Сбросить"));
 
     await waitFor(() => {
-      const calls = (globalThis as unknown as { __fetchCalls: FetchCall[] }).__fetchCalls;
-      expect(calls.length).toBeGreaterThan(0);
+      const calls = noticeCalls();
       const last = calls[calls.length - 1]!;
       const u = parseUrl(last.url);
-      expect(u.pathname.endsWith("/api/opendata-notices")).toBe(true);
       expect(u.searchParams.get("limit")).toBe("50");
       expect(u.searchParams.get("offset")).toBe("0");
+      expect(u.searchParams.get("sort")).toBe("publish_date_desc");
       expect(u.searchParams.has("document_type")).toBe(false);
       expect(u.searchParams.has("bidd_type_code")).toBe(false);
       expect(u.searchParams.has("reg_num")).toBe(false);
     });
   });
-});
 
+  it("sorts by clicked column on the server and resets to first page", async () => {
+    render(
+      <MemoryRouter>
+        <TradesPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Найдено:/);
+    fireEvent.click(screen.getByRole("button", { name: /Реестровый номер/ }));
+
+    await waitFor(() => {
+      const calls = noticeCalls();
+      const last = calls[calls.length - 1]!;
+      const u = parseUrl(last.url);
+      expect(u.searchParams.get("sort")).toBe("reg_num_asc");
+      expect(u.searchParams.get("offset")).toBe("0");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Реестровый номер/ }));
+
+    await waitFor(() => {
+      const calls = noticeCalls();
+      const last = calls[calls.length - 1]!;
+      const u = parseUrl(last.url);
+      expect(u.searchParams.get("sort")).toBe("reg_num_desc");
+      expect(u.searchParams.get("offset")).toBe("0");
+    });
+  });
+});

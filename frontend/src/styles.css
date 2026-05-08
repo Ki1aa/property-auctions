@@ -486,6 +486,39 @@ th {
   letter-spacing: 0.03em;
 }
 
+.table__sortable-heading {
+  padding: 0;
+}
+
+.table__sort-button {
+  width: 100%;
+  min-height: 42px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 11px 14px;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+}
+
+.table__sort-button:hover:not(:disabled),
+.table__sort-button--active {
+  background: #eef5ff;
+  color: var(--primary);
+}
+
+.table__sort-indicator {
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 12px;
+  line-height: 1;
+}
+
 tr:last-child td {
   border-bottom: none;
 }
@@ -535,6 +568,55 @@ tr:hover td {
 .cell--mono {
   font-family: ui-monospace, SFMono-Regular, "Menlo", Consolas, monospace;
   font-size: 13px;
+}
+
+.notices-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(240px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.notices-filters .filters__field,
+.notices-filters .facet-picker {
+  min-width: 0;
+}
+
+.notices-filters input,
+.notices-filters select,
+.notices-filters .facet-picker__trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.notices-filters__actions {
+  grid-column: auto;
+  justify-content: flex-end;
+  align-self: end;
+}
+
+.notices-table {
+  table-layout: fixed;
+}
+
+.notices-table th:nth-child(1) {
+  width: 26%;
+}
+
+.notices-table th:nth-child(2) {
+  width: 20%;
+}
+
+.notices-table th:nth-child(3) {
+  width: 17%;
+}
+
+.notices-table th:nth-child(4) {
+  width: 22%;
+}
+
+.notices-table th:nth-child(5) {
+  width: 15%;
 }
 
 .lots-filters {
@@ -1082,6 +1164,14 @@ tr:hover td {
 }
 
 @media (max-width: 980px) {
+  .notices-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .notices-filters__actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
   .lots-filters {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
@@ -1117,6 +1207,15 @@ tr:hover td {
   .table {
     display: block;
     overflow-x: auto;
+  }
+  .notices-filters {
+    grid-template-columns: 1fr;
+  }
+  .notices-filters__actions {
+    grid-column: 1 / -1;
+  }
+  .notices-table {
+    min-width: 760px;
   }
   .lots-filters {
     grid-template-columns: 1fr;
