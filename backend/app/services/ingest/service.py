@@ -16,6 +16,7 @@ from app.services.ingest.client import fetch_json_payload, fetch_json_payload_wi
 from app.services.ingest.detail_parser import match_izhs, parse_notice_detail, split_keywords
 from app.services.ingest.discovery import DiscoveredDatasetFile, build_discovery_plan
 from app.services.ingest.normalizer import normalize_lot
+from app.services.nspd.enrich import maybe_enrich_lot_nspd_async
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +295,9 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     detail_fetch_count = 0
     allowed_regions = _target_region_codes()
     izhs_keywords = split_keywords(settings.izhs_keywords)
+    nspd_budget: list[int] | None = None
+    if settings.nspd_enabled and settings.nspd_max_per_run > 0:
+        nspd_budget = [settings.nspd_max_per_run]
 
     try:
         last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
@@ -365,7 +369,9 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                     )
                     if not _passes_region_filter(normalized, allowed_regions):
                         continue
-                    is_changed = await _upsert_lot(db, normalized, opendata_notice_id=notice_id)
+                    is_changed = await _upsert_lot(
+                        db, normalized, opendata_notice_id=notice_id, nspd_budget=nspd_budget
+                    )
                     file_upserted += 1
                     upserted_count += 1
                     if is_changed:
@@ -519,7 +525,11 @@ async def _maybe_enrich_with_detail(
 
 
 async def _upsert_lot(
-    db: Session, normalized: dict, *, opendata_notice_id: int | None = None
+    db: Session,
+    normalized: dict,
+    *,
+    opendata_notice_id: int | None = None,
+    nspd_budget: list[int] | None = None,
 ) -> bool:
     organizer_data = normalized["organizer"]
     organizer = db.scalar(select(Organizer).where(Organizer.source_id == organizer_data["source_id"]))
@@ -579,6 +589,9 @@ async def _upsert_lot(
         db.add(LotSnapshot(lot_id=lot.id, payload_hash=new_hash, payload=normalized["raw"]))
 
     db.commit()
+    db.refresh(lot)
+
+    await maybe_enrich_lot_nspd_async(db, lot, nspd_budget)
 
     if created:
         await notify_lot_event(db, lot, "new_lot", f"{lot.source_id}:{new_hash}")

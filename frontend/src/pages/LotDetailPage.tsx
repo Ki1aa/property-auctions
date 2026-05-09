@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { fetchLot } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import { LotDetail, MapPoint } from "../types";
+import { pkkMapUrl } from "../utils/links";
 
 const TradesMap = lazy(() =>
   import("../components/TradesMap").then((module) => ({ default: module.TradesMap }))
@@ -49,11 +50,6 @@ function izhsReason(lot: LotDetail): string {
     return `Нет, коды ВРИ не входят в ИЖС-whitelist: ${lot.permitted_use_codes}.`;
   }
   return "Нет, код ВРИ не найден в извещении.";
-}
-
-function pkkLink(cadastral: string | null): string | null {
-  if (!cadastral) return null;
-  return `https://pkk.rosreestr.ru/#/search/${encodeURIComponent(cadastral)}/?text=${encodeURIComponent(cadastral)}`;
 }
 
 export function LotDetailPage() {
@@ -107,6 +103,9 @@ export function LotDetailPage() {
   const hasLandSection =
     lot.cadastral_number || lot.area_sqm !== null || lot.land_category || lot.permitted_use || lot.address;
 
+  const pkkHref = lot.pkk_map_url ?? pkkMapUrl(lot.cadastral_number);
+  const jsonNoticeHref = lot.notice_detail_url || lot.source_url;
+
   return (
     <div className="page">
       <Link to="/lots" className="back-link">← К списку лотов</Link>
@@ -119,6 +118,84 @@ export function LotDetailPage() {
         </div>
       </div>
       <p className="page__subtitle">ID источника: {lot.source_id}</p>
+
+      <section className="section">
+        <h2>Ссылки</h2>
+        <div className="card">
+          <div className="card__row">
+            <span className="card__label">В приложении</span>
+            <span>
+              <Link to={`/lots/${lot.id}`}>Карточка в мониторе</Link>
+            </span>
+          </div>
+          {lot.app_lot_url ? (
+            <div className="card__row">
+              <span className="card__label">Публичный URL</span>
+              <span>
+                <a href={lot.app_lot_url} target="_blank" rel="noreferrer">
+                  {lot.app_lot_url}
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.torgi_url ? (
+            <div className="card__row">
+              <span className="card__label">ГИС Торги</span>
+              <span>
+                <a href={lot.torgi_url} target="_blank" rel="noreferrer">
+                  Открыть извещение
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {jsonNoticeHref && jsonNoticeHref !== lot.torgi_url ? (
+            <div className="card__row">
+              <span className="card__label">JSON извещения</span>
+              <span>
+                <a href={jsonNoticeHref} target="_blank" rel="noreferrer">
+                  Скачать / открыть JSON
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {pkkHref ? (
+            <div className="card__row">
+              <span className="card__label">ПКК Росреестра</span>
+              <span>
+                <a href={pkkHref} target="_blank" rel="noreferrer">
+                  Публичная кадастровая карта
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.domclick_search_url ? (
+            <div className="card__row">
+              <span className="card__label">Домклик</span>
+              <span>
+                <a href={lot.domclick_search_url} target="_blank" rel="noreferrer">
+                  Поиск участков (оценочно)
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.avito_search_url ? (
+            <div className="card__row">
+              <span className="card__label">Авито</span>
+              <span>
+                <a href={lot.avito_search_url} target="_blank" rel="noreferrer">
+                  Поиск участков (оценочно)
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {(lot.domclick_search_url || lot.avito_search_url) && (
+            <p className="card__footnote">
+              Ссылки на Домклик и Авито ведут в общий поиск по адресу и кадастру; это не официальная карта цен по
+              конкретному участку.
+            </p>
+          )}
+        </div>
+      </section>
 
       <section className="card">
         <div className="card__row"><span className="card__label">Регион</span><span>{lot.region || "—"}</span></div>
@@ -178,10 +255,10 @@ export function LotDetailPage() {
             <div className="card__row">
               <span className="card__label">Кадастровый номер</span>
               <span className="cell--mono">
-                {lot.cadastral_number ? (
-                  <a href={pkkLink(lot.cadastral_number)!} target="_blank" rel="noreferrer">{lot.cadastral_number}</a>
+                {lot.cadastral_number && pkkHref ? (
+                  <a href={pkkHref} target="_blank" rel="noreferrer">{lot.cadastral_number}</a>
                 ) : (
-                  "—"
+                  lot.cadastral_number || "—"
                 )}
               </span>
             </div>
@@ -191,12 +268,52 @@ export function LotDetailPage() {
             <div className="card__row"><span className="card__label">Коды ВРИ</span><span>{lot.permitted_use_codes || "—"}</span></div>
             <div className="card__row"><span className="card__label">ИЖС-кандидат</span><span>{izhsReason(lot)}</span></div>
             <div className="card__row"><span className="card__label">Адрес</span><span>{lot.address || "—"}</span></div>
-            {lot.cadastral_number && (
+            {pkkHref ? (
               <div className="card__row">
                 <span className="card__label">Публичная кадастровая карта</span>
-                <span><a href={pkkLink(lot.cadastral_number)!} target="_blank" rel="noreferrer">Открыть на ПКК Росреестра</a></span>
+                <span><a href={pkkHref} target="_blank" rel="noreferrer">Открыть на ПКК Росреестра</a></span>
               </div>
-            )}
+            ) : null}
+          </div>
+        </section>
+      )}
+
+      {(lot.nspd_enriched_at ||
+        lot.nspd_specified_area_sqm != null ||
+        lot.nspd_readable_address ||
+        lot.nspd_cost_value != null ||
+        lot.nspd_centroid_latitude != null) && (
+        <section className="section">
+          <h2>НСПД (геопортал)</h2>
+          <p className="card__footnote" style={{ marginBottom: 12 }}>
+            Данные из nspd.gov.ru при включённом загрузчиком флаге NSPD_ENABLED. Не заменяют поля из извещения без
+            отдельной политики слияния.
+          </p>
+          <div className="card">
+            <div className="card__row">
+              <span className="card__label">Площадь по НСПД</span>
+              <span>{lot.nspd_specified_area_sqm != null ? formatArea(lot.nspd_specified_area_sqm) : "—"}</span>
+            </div>
+            <div className="card__row">
+              <span className="card__label">Адрес (читаемый)</span>
+              <span>{lot.nspd_readable_address || "—"}</span>
+            </div>
+            <div className="card__row">
+              <span className="card__label">Кадастровая стоимость</span>
+              <span>{formatPrice(lot.nspd_cost_value)}</span>
+            </div>
+            <div className="card__row">
+              <span className="card__label">Центроид полигона (WGS84)</span>
+              <span>
+                {lot.nspd_centroid_latitude != null && lot.nspd_centroid_longitude != null
+                  ? `${lot.nspd_centroid_latitude.toFixed(6)}, ${lot.nspd_centroid_longitude.toFixed(6)}`
+                  : "—"}
+              </span>
+            </div>
+            <div className="card__row">
+              <span className="card__label">Обновлено из НСПД</span>
+              <span>{lot.nspd_enriched_at ? formatDate(lot.nspd_enriched_at) : "—"}</span>
+            </div>
           </div>
         </section>
       )}

@@ -1,8 +1,19 @@
 # План развития ГИС Торги Monitor
 
-Дата ревизии: 2026-05-05.
+Дата ревизии: 2026-05-09.
 
 Цель плана - довести MVP от рабочего мониторинга ГИС Торги до инструмента, который уверенно находит ИЖС-лоты, показывает качество данных, считает первичную привлекательность и отправляет только полезные алерты.
+
+## MVP: время, ссылки, Telegram, внешний контекст
+
+**Цель:** в списке и карточке лота видны дата/время ключевых этапов и ссылки на монитор, ГИС Торги (страница извещения при известном `regNum`, иначе JSON), ПКК по кадастру, опционально поиск на Домклик/Авито; в Telegram при `new_lot` / `changed_lot` то же плюс baseline.
+
+**Выполнено 2026-05-09:**
+- Backend: [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — генерация URL; настройки `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS` в [backend/app/config.py](backend/app/config.py); поля `app_lot_url`, `torgi_url`, `pkk_map_url`, `domclick_search_url`, `avito_search_url` в ответах `/api/lots` и `/api/lots/{id}`.
+- Telegram: HTML-сообщения с экранированием и ссылками ([backend/app/services/alerts/service.py](backend/app/services/alerts/service.py), [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py)).
+- Frontend: таблица `/lots` — даты со временем, колонка ссылок; карточка — блок «Ссылки» ([frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx)).
+
+**Ограничение:** ссылки Домклик/Авито — шаблонный поиск по кадастру/адресу/региону, не гарантированная «карта цен по участку». Точная интеграция — после разведки (задача E ниже) и/или НСПД.
 
 ## 0. Делегирование ИИ с прямым доступом к РФ-ресурсам
 
@@ -151,6 +162,12 @@
 
 Срок: 1-2 недели после подтверждения сетевого доступа.
 
+**Сделано 2026-05-09 (каркас + ingest):**
+- Модуль [backend/app/services/nspd/client.py](backend/app/services/nspd/client.py): разбор ответа geoportal (`data` / `features` / …), `NspdGeoportalClient.search_by_cadastral` при `NSPD_ENABLED=true`.
+- [backend/app/services/nspd/enrich.py](backend/app/services/nspd/enrich.py): поля `properties.options` (площадь, адрес, стоимость), центроид полигона EPSG:3857; после upsert лота в [ingest/service.py](backend/app/services/ingest/service.py) при наличии кадастра (лимит `NSPD_MAX_PER_RUN`, кеш `NSPD_REFRESH_AFTER_DAYS`).
+- Колонки `lots.nspd_*`, Alembic `20260509_09_add_lot_nspd_fields.py`; карточка лота в UI — блок «НСПД».
+- Настройки в [backend/app/config.py](backend/app/config.py) и [.env.example](.env.example).
+
 **Задачи:**
 - Исследовать доступные endpoints НСПД и ограничения запросов.
 - Спроектировать минимальную модель кадастрового обогащения:
@@ -264,7 +281,7 @@
 
 ## Приоритет на следующий рабочий заход
 
-1. Запустить MVP вручную на demo-БД и пройти smoke-test страниц `/`, `/lots`, `/lots/:id`, `/notices`, `/ingest`.
-2. Спроектировать и добавить `CadastralEnrichment` / НСПД-клиент на основе найденного endpoint'а `api/geoportal/v1/search/geoportal`.
-3. После НСПД-слоя уточнить baseline и перейти к Циан/рыночным аналогам.
-4. `investment_score` и Telegram smart-алерты пока отложены по решению пользователя.
+1. Smoke-test `/lots`, `/lots/:id`, ingest. Telegram опционально: завести бота и задать `TELEGRAM_*` позже; при деплое SPA — `APP_PUBLIC_BASE_URL`.
+2. НСПД: каркас клиента в `backend/app/services/nspd/` (выключен `NSPD_ENABLED=false`). Дальше — `CadastralEnrichment`, кеш, подключение к ingest/репроцессингу.
+3. После НСПД-слоя уточнить baseline; разведка Циан/Домклик/Авито (задача E) для осмысленных ссылок на рынок, не только поисковый query.
+4. `investment_score` и Telegram smart-алерты (порог по score) — после появления внешней оценки или отдельным решением.

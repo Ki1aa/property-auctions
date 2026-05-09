@@ -1,8 +1,5 @@
 import csv
-from collections import defaultdict
-from dataclasses import dataclass
 from io import StringIO
-from statistics import median
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +11,20 @@ from app.database import get_db
 from app.models import IngestRun, Lot, OpenDataNotice, Organizer
 from app import scheduler as ingest_scheduler
 from app.config import settings
+from app.services.external_lot_links import (
+    app_public_lot_url,
+    avito_search_url,
+    domclick_land_search_url,
+    pkk_map_url,
+    torgi_public_url,
+)
+from app.services.lot_baseline import (
+    LotValuation,
+    derived_prices,
+    has_positive_discount as lot_has_positive_discount,
+    load_baseline_index,
+    lot_valuation,
+)
 from app.schemas import (
     IngestRunView,
     IngestStatusView,
@@ -50,23 +61,6 @@ NoticeSort = Literal[
 ]
 
 
-@dataclass(frozen=True)
-class BaselineStats:
-    price_per_sotka: float
-    sample_size: int
-    scope: str
-
-
-@dataclass(frozen=True)
-class LotValuation:
-    baseline_price_per_sotka: float | None = None
-    discount_to_baseline: float | None = None
-    valuation_confidence: str | None = None
-    valuation_baseline_scope: str | None = None
-    valuation_baseline_sample_size: int | None = None
-    valuation_reason: str | None = None
-
-
 def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     if not values:
         return None
@@ -81,145 +75,8 @@ def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
-def _derived_prices(start_price: float | None, area_sqm: float | None) -> tuple[float | None, float | None]:
-    """Rub per sotka (100 m²) and per m² from notice start_price and area; not market valuation."""
-    if start_price is None or area_sqm is None or area_sqm <= 0:
-        return None, None
-    per_sqm = start_price / area_sqm
-    per_sotka = start_price / (area_sqm / 100.0)
-    return (round(per_sotka, 2), round(per_sqm, 2))
-
-
-def _price_per_sotka(start_price: float | None, area_sqm: float | None) -> float | None:
-    if start_price is None or area_sqm is None or area_sqm <= 0:
-        return None
-    return start_price / (area_sqm / 100.0)
-
-
-def _baseline_bucket(values: list[float], scope: str) -> BaselineStats | None:
-    if not values:
-        return None
-    return BaselineStats(
-        price_per_sotka=round(float(median(values)), 2),
-        sample_size=len(values),
-        scope=scope,
-    )
-
-
-def _load_baseline_index(db: Session) -> dict[str, dict[Any, BaselineStats] | BaselineStats | None]:
-    rows = db.execute(
-        select(Lot.region, Lot.category, Lot.start_price, Lot.area_sqm).where(
-            Lot.start_price.is_not(None),
-            Lot.area_sqm.is_not(None),
-            Lot.area_sqm > 0,
-        )
-    ).all()
-    by_region_category: dict[tuple[str | None, str | None], list[float]] = defaultdict(list)
-    by_region: dict[str | None, list[float]] = defaultdict(list)
-    by_category: dict[str | None, list[float]] = defaultdict(list)
-    global_values: list[float] = []
-
-    for region, category, start_price, area_sqm in rows:
-        value = _price_per_sotka(start_price, area_sqm)
-        if value is None:
-            continue
-        by_region_category[(region, category)].append(value)
-        by_region[region].append(value)
-        by_category[category].append(value)
-        global_values.append(value)
-
-    return {
-        "region_category": {
-            key: stats
-            for key, values in by_region_category.items()
-            if (stats := _baseline_bucket(values, "region_category")) is not None
-        },
-        "region": {
-            key: stats
-            for key, values in by_region.items()
-            if (stats := _baseline_bucket(values, "region")) is not None
-        },
-        "category": {
-            key: stats
-            for key, values in by_category.items()
-            if (stats := _baseline_bucket(values, "category")) is not None
-        },
-        "global": _baseline_bucket(global_values, "global"),
-    }
-
-
-def _baseline_scope_label(scope: str) -> str:
-    labels = {
-        "region_category": "региону и виду торгов",
-        "region": "региону",
-        "category": "виду торгов",
-        "global": "всем лотам с ценой и площадью",
-    }
-    return labels.get(scope, scope)
-
-
-def _confidence(stats: BaselineStats) -> str:
-    if stats.scope in {"region_category", "region"} and stats.sample_size >= 10:
-        return "high"
-    if stats.scope in {"region_category", "region", "category"} and stats.sample_size >= 5:
-        return "medium"
-    return "low"
-
-
-def _pick_baseline(lot: Lot, index: dict[str, dict[Any, BaselineStats] | BaselineStats | None]) -> BaselineStats | None:
-    region_category = index["region_category"]
-    if isinstance(region_category, dict):
-        stats = region_category.get((lot.region, lot.category))
-        if stats and stats.sample_size >= 3:
-            return stats
-
-    by_region = index["region"]
-    if isinstance(by_region, dict):
-        stats = by_region.get(lot.region)
-        if stats and stats.sample_size >= 3:
-            return stats
-
-    by_category = index["category"]
-    if isinstance(by_category, dict):
-        stats = by_category.get(lot.category)
-        if stats and stats.sample_size >= 5:
-            return stats
-
-    global_stats = index["global"]
-    if isinstance(global_stats, BaselineStats) and global_stats.sample_size >= 10:
-        return global_stats
-    return None
-
-
-def _lot_valuation(lot: Lot, index: dict[str, dict[Any, BaselineStats] | BaselineStats | None]) -> LotValuation:
-    current = _price_per_sotka(lot.start_price, lot.area_sqm)
-    if current is None:
-        return LotValuation(valuation_reason="Нет стартовой цены или площади для расчёта.")
-
-    baseline = _pick_baseline(lot, index)
-    if baseline is None or baseline.price_per_sotka <= 0:
-        return LotValuation(valuation_reason="Недостаточно лотов с ценой и площадью для baseline.")
-
-    discount = (baseline.price_per_sotka - current) / baseline.price_per_sotka
-    return LotValuation(
-        baseline_price_per_sotka=baseline.price_per_sotka,
-        discount_to_baseline=round(discount, 4),
-        valuation_confidence=_confidence(baseline),
-        valuation_baseline_scope=baseline.scope,
-        valuation_baseline_sample_size=baseline.sample_size,
-        valuation_reason=(
-            f"Сравнение с медианой по {_baseline_scope_label(baseline.scope)} "
-            f"на основе {baseline.sample_size} лотов."
-        ),
-    )
-
-
-def _has_positive_discount(valuation: LotValuation) -> bool:
-    return valuation.discount_to_baseline is not None and valuation.discount_to_baseline > 0
-
-
 def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListItem:
-    ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
+    ps, pm = derived_prices(lot.start_price, lot.area_sqm)
     valuation = valuation or LotValuation()
     return LotListItem(
         id=lot.id,
@@ -232,6 +89,9 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         current_price=lot.current_price,
         start_date=lot.start_date,
         end_date=lot.end_date,
+        created_at=lot.created_at,
+        updated_at=lot.updated_at,
+        source_url=lot.source_url,
         cadastral_number=lot.cadastral_number,
         area_sqm=lot.area_sqm,
         municipality=lot.municipality,
@@ -245,6 +105,11 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         valuation_baseline_scope=valuation.valuation_baseline_scope,
         valuation_baseline_sample_size=valuation.valuation_baseline_sample_size,
         valuation_reason=valuation.valuation_reason,
+        app_lot_url=app_public_lot_url(lot.id),
+        torgi_url=torgi_public_url(lot, None),
+        pkk_map_url=pkk_map_url(lot.cadastral_number),
+        domclick_search_url=domclick_land_search_url(lot),
+        avito_search_url=avito_search_url(lot),
     )
 
 
@@ -364,19 +229,19 @@ def list_lots(
         has_cadastral,
         has_price_per_sotka,
     )
-    baseline_index = _load_baseline_index(db)
+    baseline_index = load_baseline_index(db)
 
     if sort == "discount_to_baseline_desc" or has_positive_discount is not None:
         stmt = select(Lot)
         if filters:
             stmt = stmt.where(and_(*filters))
         all_rows = db.scalars(stmt).all()
-        valuations = {row.id: _lot_valuation(row, baseline_index) for row in all_rows}
+        valuations = {row.id: lot_valuation(row, baseline_index) for row in all_rows}
         if has_positive_discount is not None:
             all_rows = [
                 row
                 for row in all_rows
-                if _has_positive_discount(valuations[row.id]) is has_positive_discount
+                if lot_has_positive_discount(valuations[row.id]) is has_positive_discount
             ]
         sorted_rows = sorted(
             all_rows,
@@ -402,7 +267,7 @@ def list_lots(
         stmt = stmt.where(and_(*filters))
     stmt = stmt.offset(offset).limit(limit)
     rows = db.scalars(stmt).all()
-    valuations = {row.id: _lot_valuation(row, baseline_index) for row in rows}
+    valuations = {row.id: lot_valuation(row, baseline_index) for row in rows}
     return LotListPage(
         items=[_lot_list_item(row, valuations[row.id]) for row in rows],
         total=total,
@@ -442,19 +307,19 @@ def export_lots_csv(
         has_cadastral,
         has_price_per_sotka,
     )
-    baseline_index = _load_baseline_index(db)
+    baseline_index = load_baseline_index(db)
 
     if sort == "discount_to_baseline_desc" or has_positive_discount is not None:
         stmt = select(Lot)
         if filters:
             stmt = stmt.where(and_(*filters))
         rows = db.scalars(stmt).all()
-        valuations = {row.id: _lot_valuation(row, baseline_index) for row in rows}
+        valuations = {row.id: lot_valuation(row, baseline_index) for row in rows}
         if has_positive_discount is not None:
             rows = [
                 row
                 for row in rows
-                if _has_positive_discount(valuations[row.id]) is has_positive_discount
+                if lot_has_positive_discount(valuations[row.id]) is has_positive_discount
             ]
         rows = sorted(
             rows,
@@ -472,7 +337,7 @@ def export_lots_csv(
             stmt = stmt.where(and_(*filters))
         stmt = stmt.limit(max_rows)
         rows = db.scalars(stmt).all()
-        valuations = {row.id: _lot_valuation(row, baseline_index) for row in rows}
+        valuations = {row.id: lot_valuation(row, baseline_index) for row in rows}
 
     buf = StringIO()
     buf.write("\ufeff")
@@ -505,7 +370,7 @@ def export_lots_csv(
         ]
     )
     for lot in rows:
-        ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
+        ps, pm = derived_prices(lot.start_price, lot.area_sqm)
         valuation = valuations[lot.id]
         writer.writerow(
             [
@@ -579,8 +444,8 @@ def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)
     if filters:
         stmt = stmt.where(and_(*filters))
     rows = db.scalars(stmt).all()
-    baseline_index = _load_baseline_index(db)
-    valuations = [_lot_valuation(row, baseline_index) for row in rows]
+    baseline_index = load_baseline_index(db)
+    valuations = [lot_valuation(row, baseline_index) for row in rows]
 
     return LotQualityMetrics(
         region=region,
@@ -593,7 +458,7 @@ def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)
         with_price_per_sotka=count_where(and_(Lot.start_price.is_not(None), Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
         with_baseline=sum(1 for valuation in valuations if valuation.baseline_price_per_sotka is not None),
         with_positive_discount=sum(
-            1 for valuation in valuations if _has_positive_discount(valuation)
+            1 for valuation in valuations if lot_has_positive_discount(valuation)
         ),
     )
 
@@ -615,37 +480,16 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         if notice is not None and isinstance(notice.payload, dict):
             notice_payload = notice.payload
 
-    ps, pm = _derived_prices(lot.start_price, lot.area_sqm)
-    valuation = _lot_valuation(lot, _load_baseline_index(db))
+    valuation = lot_valuation(lot, load_baseline_index(db))
+    list_base = _lot_list_item(lot, valuation)
+    list_fields = list_base.model_dump()
+    list_fields["torgi_url"] = torgi_public_url(lot, notice_payload)
     return LotDetail(
-        id=lot.id,
-        source_id=lot.source_id,
-        title=lot.title,
-        status=lot.status,
-        region=lot.region,
-        category=lot.category,
-        start_price=lot.start_price,
-        current_price=lot.current_price,
-        start_date=lot.start_date,
-        end_date=lot.end_date,
+        **list_fields,
         latitude=lot.latitude,
         longitude=lot.longitude,
-        source_url=lot.source_url,
         organizer_name=organizer.name if organizer else None,
         organizer_inn=organizer.inn if organizer else None,
-        cadastral_number=lot.cadastral_number,
-        area_sqm=lot.area_sqm,
-        municipality=lot.municipality,
-        settlement=lot.settlement,
-        is_izhs_candidate=bool(lot.is_izhs_candidate),
-        start_price_per_sotka=ps,
-        start_price_per_sqm=pm,
-        baseline_price_per_sotka=valuation.baseline_price_per_sotka,
-        discount_to_baseline=valuation.discount_to_baseline,
-        valuation_confidence=valuation.valuation_confidence,
-        valuation_baseline_scope=valuation.valuation_baseline_scope,
-        valuation_baseline_sample_size=valuation.valuation_baseline_sample_size,
-        valuation_reason=valuation.valuation_reason,
         land_category=lot.land_category,
         permitted_use=lot.permitted_use,
         permitted_use_codes=lot.permitted_use_codes,
@@ -653,6 +497,12 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         notice_detail_url=lot.notice_detail_url,
         opendata_notice_id=lot.opendata_notice_id,
         notice_payload=notice_payload,
+        nspd_specified_area_sqm=lot.nspd_specified_area_sqm,
+        nspd_readable_address=lot.nspd_readable_address,
+        nspd_cost_value=lot.nspd_cost_value,
+        nspd_centroid_latitude=lot.nspd_centroid_latitude,
+        nspd_centroid_longitude=lot.nspd_centroid_longitude,
+        nspd_enriched_at=lot.nspd_enriched_at,
     )
 
 

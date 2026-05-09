@@ -6,6 +6,78 @@
 
 ---
 
+## 2026-05-09 - НСПД: поля в БД, обогащение при ingest, UI карточки
+
+**Что сделано:**
+- Модель [backend/app/models.py](backend/app/models.py): `nspd_specified_area_sqm`, `nspd_readable_address`, `nspd_cost_value`, `nspd_centroid_latitude/longitude`, `nspd_enriched_at`.
+- Alembic [backend/alembic/versions/20260509_09_add_lot_nspd_fields.py](backend/alembic/versions/20260509_09_add_lot_nspd_fields.py); утилита геометрии [backend/app/services/nspd/geometry.py](backend/app/services/nspd/geometry.py).
+- [backend/app/services/nspd/enrich.py](backend/app/services/nspd/enrich.py): разбор Feature, `maybe_enrich_lot_nspd_async` (HTTP в `asyncio.to_thread`, без мутации ORM в воркере).
+- [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py): после commit upsert лота — NSPD при `NSPD_ENABLED`, бюджет `nspd_max_per_run`, пропуск при свежем `nspd_enriched_at` (`nspd_refresh_after_days`).
+- API [backend/app/schemas.py](backend/app/schemas.py), [backend/app/api.py](backend/app/api.py): поля в `LotDetail`; фронт [frontend/src/types.ts](frontend/src/types.ts), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx).
+- Тесты [backend/tests/test_nspd_enrich.py](backend/tests/test_nspd_enrich.py); конфиг [.env.example](.env.example) (`NSPD_MAX_PER_RUN`, `NSPD_REFRESH_AFTER_DAYS`); [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md).
+
+**Проверки:**
+- `python scripts/dev_sync_schema.py`: добавлены 6 колонок `lots.nspd_*` и индекс `ix_lots_nspd_enriched_at`.
+- `python -m pytest`: 70 passed.
+- `npx tsc --noEmit`: ок.
+
+**Следующее:**
+- Политика слияния НСПД vs извещение (приоритет полей); при необходимости карта по `nspd_centroid_*`.
+
+---
+
+## 2026-05-09 - Baseline в отдельном модуле, каркас клиента НСПД
+
+**Что сделано:**
+- Вынесен расчёт baseline и derived prices в [backend/app/services/lot_baseline.py](backend/app/services/lot_baseline.py); [backend/app/api.py](backend/app/api.py) и [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py) используют его без циклического импорта `alerts` → `api`.
+- Добавлен опциональный клиент НСПД: [backend/app/services/nspd/client.py](backend/app/services/nspd/client.py), настройки `NSPD_*` в [backend/app/config.py](backend/app/config.py) и [.env.example](.env.example); по умолчанию `nspd_enabled=false`, сетевых вызовов из ingest нет.
+- Тесты [backend/tests/test_nspd_client.py](backend/tests/test_nspd_client.py).
+- Обновлены [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) (приоритеты, блок раздела 3), [AGENTS.md](AGENTS.md).
+
+**Затронутые файлы:**
+- backend/app/{api.py,config.py}
+- backend/app/services/{lot_baseline.py,alerts/service.py,nspd/__init__.py,nspd/client.py}
+- backend/tests/test_nspd_client.py
+- .env.example, DEVELOPMENT_PLAN.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: ожидается полный зелёный прогон.
+
+**Следующее:**
+- Подключить НСПД к enrich после появления модели кеша/полей в `Lot`; включить `NSPD_ENABLED` только на машине с доступом к `nspd.gov.ru`.
+
+---
+
+## 2026-05-09 - MVP: время и ссылки у лотов, Telegram, внешние карты
+
+**Что сделано:**
+- Добавлен [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): URL страницы извещения на `torgi.gov.ru` (`/new/public/notices/view/{regNum}`) при наличии номера в `notice_payload` или в `source_id`, иначе JSON `href`; ПКК Росреестра; опционально поиск Домклик/Авито по строке из кадастра, адреса, муниципалитета, региона.
+- В [backend/app/config.py](backend/app/config.py) и [.env.example](.env.example): `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS`.
+- Расширены [backend/app/schemas.py](backend/app/schemas.py) и [backend/app/api.py](backend/app/api.py): поля ссылок в списке и детале лота; для деталя `torgi_url` учитывает `notice_payload`.
+- Telegram: [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py) формирует HTML с baseline, полями лота и ссылками; [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py) поддерживает `parse_mode` и `disable_web_page_preview`.
+- Фронт: [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx) — даты начала/окончания со временем, колонка ссылок; [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx) — секция «Ссылки» и сноска про маркетплейсы; [frontend/src/utils/links.ts](frontend/src/utils/links.ts); типы в [frontend/src/types.ts](frontend/src/types.ts).
+- Документы: [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md); тесты [backend/tests/test_external_lot_links.py](backend/tests/test_external_lot_links.py), [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py), расширен [backend/tests/test_api.py](backend/tests/test_api.py).
+
+**Затронутые файлы:**
+- backend/app/{config.py,api.py,schemas.py}
+- backend/app/services/{external_lot_links.py,alerts/service.py,alerts/telegram.py}
+- backend/tests/{test_external_lot_links.py,test_alerts_service.py,test_api.py}
+- frontend/src/{types.ts,components/LotsTable.tsx,pages/LotDetailPage.tsx,utils/links.ts,styles.css}
+- .env.example, DEVELOPMENT_PLAN.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 62 passed.
+- `npx tsc --noEmit` в `frontend/`: ок.
+- `npm run test` в `frontend/`: 3 passed.
+
+**Известные проблемы / TODO:**
+- Ссылки на Домклик/Авито остаются эвристическим поиском; привязка «цены по району» к кадастру без API источника не делалась.
+
+**Следующее:**
+- НСПД и разведка маркетплейсов по [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md); настройка реального Telegram и `APP_PUBLIC_BASE_URL` в окружении.
+
+---
+
 ## 2026-05-08 - Сортировка извещений и выравнивание фильтров
 
 **Что сделано:**

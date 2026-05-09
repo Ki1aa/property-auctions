@@ -455,7 +455,12 @@ def test_lot_detail_returns_notice_payload_when_linked():
             title="Лот с привязкой",
             status="active",
             region="72",
+            cadastral_number="72:01:0000000:1",
+            municipality="Тюмень",
+            address="ул. Примерная, 1",
             opendata_notice_id=notice_id,
+            source_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
+            notice_detail_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
         )
     )
     db.commit()
@@ -470,6 +475,10 @@ def test_lot_detail_returns_notice_payload_when_linked():
     assert body["notice_payload"] is not None
     assert body["notice_payload"]["regNum"] == "72000000000000000123"
     assert body["notice_payload"]["extra"] == "raw"
+    assert body["torgi_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
+    assert body["pkk_map_url"] is not None and "pkk.rosreestr.ru" in body["pkk_map_url"]
+    assert body["domclick_search_url"] is not None and "domclick.ru" in body["domclick_search_url"]
+    assert body["avito_search_url"] is not None and "avito.ru" in body["avito_search_url"]
 
 
 def test_lot_detail_returns_null_notice_payload_when_not_linked():

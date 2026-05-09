@@ -54,6 +54,14 @@ class Lot(Base):
         ForeignKey("opendata_notices.id"), nullable=True, index=True
     )
 
+    # NSPD geoportal (optional; filled when NSPD_ENABLED and cadastral_number present).
+    nspd_specified_area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_readable_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nspd_cost_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_centroid_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_centroid_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

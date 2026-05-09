@@ -689,7 +689,7 @@ tr:hover td {
 
 .lots-table {
   table-layout: fixed;
-  min-width: 960px;
+  min-width: 1180px;
 }
 
 .lots-table th,
@@ -698,31 +698,59 @@ tr:hover td {
 }
 
 .lots-table__lot-col {
-  width: 32%;
+  width: 28%;
 }
 
 .lots-table__status-col {
-  width: 16%;
+  width: 14%;
 }
 
 .lots-table__area-col {
-  width: 9%;
+  width: 8%;
 }
 
 .lots-table__price-col {
-  width: 13%;
-}
-
-.lots-table__baseline-col {
   width: 12%;
 }
 
+.lots-table__baseline-col {
+  width: 11%;
+}
+
 .lots-table__confidence-col {
-  width: 10%;
+  width: 9%;
+}
+
+.lots-table__updated-col {
+  width: 11%;
 }
 
 .lots-table__date-col {
-  width: 8%;
+  width: 11%;
+}
+
+.lots-table__links-col {
+  width: 12%;
+}
+
+.lots-table__links-cell {
+  min-width: 0;
+}
+
+.lots-table__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+}
+
+.lots-table__dates-cell {
+  min-width: 0;
+}
+
+.lots-table__ext-link {
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .lots-table__lot-cell {
@@ -1066,6 +1094,15 @@ tr:hover td {
   flex: 1 1 auto;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.card__footnote {
+  margin: 0;
+  padding: 8px 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  border-top: 1px solid var(--border-soft);
 }
 
 /* Misc */

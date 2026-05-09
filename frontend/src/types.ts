@@ -41,6 +41,10 @@ export type Lot = {
   current_price: number | null;
   start_date: string | null;
   end_date: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  /** Notice or dataset URL on torgi.gov.ru when known. */
+  source_url: string | null;
   cadastral_number: string | null;
   area_sqm: number | null;
   municipality: string | null;
@@ -58,6 +62,11 @@ export type Lot = {
   valuation_baseline_scope: string | null;
   valuation_baseline_sample_size: number | null;
   valuation_reason: string | null;
+  app_lot_url: string | null;
+  torgi_url: string | null;
+  pkk_map_url: string | null;
+  domclick_search_url: string | null;
+  avito_search_url: string | null;
 };
 
 export type LotListPage = {
@@ -70,7 +79,6 @@ export type LotListPage = {
 export type LotDetail = Lot & {
   latitude: number | null;
   longitude: number | null;
-  source_url: string | null;
   organizer_name: string | null;
   organizer_inn: string | null;
   land_category: string | null;
@@ -80,6 +88,12 @@ export type LotDetail = Lot & {
   notice_detail_url: string | null;
   opendata_notice_id: number | null;
   notice_payload: Record<string, unknown> | null;
+  nspd_specified_area_sqm: number | null;
+  nspd_readable_address: string | null;
+  nspd_cost_value: number | null;
+  nspd_centroid_latitude: number | null;
+  nspd_centroid_longitude: number | null;
+  nspd_enriched_at: string | null;
 };
 
 export type MapPoint = {

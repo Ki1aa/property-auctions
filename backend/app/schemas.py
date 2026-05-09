@@ -15,6 +15,9 @@ class LotListItem(BaseModel):
     current_price: float | None
     start_date: datetime | None
     end_date: datetime | None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    source_url: str | None = None
     cadastral_number: str | None = None
     area_sqm: float | None = None
     municipality: str | None = None
@@ -30,6 +33,12 @@ class LotListItem(BaseModel):
     valuation_baseline_scope: str | None = None
     valuation_baseline_sample_size: int | None = None
     valuation_reason: str | None = None
+    # Deep links (see external_lot_links); marketplace URLs are best-effort search, not cadastral maps.
+    app_lot_url: str | None = None
+    torgi_url: str | None = None
+    pkk_map_url: str | None = None
+    domclick_search_url: str | None = None
+    avito_search_url: str | None = None
 
 
 class LotListPage(BaseModel):
@@ -42,7 +51,6 @@ class LotListPage(BaseModel):
 class LotDetail(LotListItem):
     latitude: float | None
     longitude: float | None
-    source_url: str | None
     organizer_name: str | None
     organizer_inn: str | None
     land_category: str | None = None
@@ -52,6 +60,12 @@ class LotDetail(LotListItem):
     notice_detail_url: str | None = None
     opendata_notice_id: int | None = None
     notice_payload: dict[str, Any] | None = None
+    nspd_specified_area_sqm: float | None = None
+    nspd_readable_address: str | None = None
+    nspd_cost_value: float | None = None
+    nspd_centroid_latitude: float | None = None
+    nspd_centroid_longitude: float | None = None
+    nspd_enriched_at: datetime | None = None
 
 
 class MapPoint(BaseModel):

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Lot } from "../types";
 import { StatusBadge } from "./StatusBadge";
+import { pkkMapUrl } from "../utils/links";
 
 type Props = {
   lots: Lot[];
@@ -19,9 +20,15 @@ function formatArea(value: number | null): string {
   return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} м²`;
 }
 
-function formatDate(value: string | null): string {
+function formatDateTime(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleDateString("ru-RU");
+  return new Date(value).toLocaleString("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatPercent(value: number | null): string {
@@ -34,6 +41,28 @@ function confidenceLabel(value: string | null): string {
   if (value === "medium") return "Средняя";
   if (value === "low") return "Низкая";
   return "—";
+}
+
+function LotLinksCell({ lot }: { lot: Lot }) {
+  const pkk = lot.pkk_map_url ?? pkkMapUrl(lot.cadastral_number);
+  const external: { href: string; label: string }[] = [];
+  if (lot.app_lot_url) external.push({ href: lot.app_lot_url, label: "Публичный URL" });
+  if (lot.torgi_url) external.push({ href: lot.torgi_url, label: "ГИС Торги" });
+  if (pkk) external.push({ href: pkk, label: "ПКК" });
+  if (lot.domclick_search_url) external.push({ href: lot.domclick_search_url, label: "Домклик" });
+  if (lot.avito_search_url) external.push({ href: lot.avito_search_url, label: "Авито" });
+  return (
+    <div className="lots-table__links">
+      <Link to={`/lots/${lot.id}`} className="lots-table__ext-link">
+        В приложении
+      </Link>
+      {external.map(({ href, label }) => (
+        <a key={label} className="lots-table__ext-link" href={href} target="_blank" rel="noreferrer">
+          {label}
+        </a>
+      ))}
+    </div>
+  );
 }
 
 export function LotsTable({ lots }: Props) {
@@ -50,7 +79,8 @@ export function LotsTable({ lots }: Props) {
           <th className="lots-table__price-col">Цена</th>
           <th className="lots-table__baseline-col">Baseline</th>
           <th className="lots-table__confidence-col">Уверенность</th>
-          <th className="lots-table__date-col">Окончание</th>
+          <th className="lots-table__date-col">Даты торгов</th>
+          <th className="lots-table__links-col">Ссылки</th>
         </tr>
       </thead>
       <tbody>
@@ -93,7 +123,17 @@ export function LotsTable({ lots }: Props) {
                 </div>
               </td>
               <td title={lot.valuation_reason ?? undefined}>{confidenceLabel(lot.valuation_confidence)}</td>
-              <td className="cell--nowrap">{formatDate(lot.end_date)}</td>
+              <td className="cell--nowrap lots-table__dates-cell">
+                <div className="lots-table__meta" title="Дата и время начала приёма заявок (если указаны в данных)">
+                  Начало: {formatDateTime(lot.start_date)}
+                </div>
+                <div className="lots-table__meta" title="Дата и время окончания">
+                  Окончание: {formatDateTime(lot.end_date)}
+                </div>
+              </td>
+              <td className="lots-table__links-cell">
+                <LotLinksCell lot={lot} />
+              </td>
             </tr>
           );
         })}
