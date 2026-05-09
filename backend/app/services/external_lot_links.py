@@ -48,6 +48,17 @@ def torgi_public_url(lot: Lot, notice_payload: dict | None = None) -> str | None
     return torgi_notice_html_url(lot, notice_payload) or torgi_notice_json_url(lot)
 
 
+def torgi_notice_json_link_when_distinct(lot: Lot, notice_payload: dict | None = None) -> str | None:
+    """Second link for UI/Telegram: raw JSON href when it differs from the HTML card URL."""
+    html_u = (torgi_notice_html_url(lot, notice_payload) or "").strip().rstrip("/")
+    json_u = (torgi_notice_json_url(lot) or "").strip().rstrip("/")
+    if not json_u:
+        return None
+    if html_u and json_u != html_u:
+        return json_u.strip() or None
+    return None
+
+
 def pkk_map_url(cadastral_number: str | None) -> str | None:
     if not cadastral_number or not str(cadastral_number).strip():
         return None
@@ -63,7 +74,7 @@ def app_public_lot_url(lot_id: int) -> str | None:
     return f"{base}/lots/{lot_id}"
 
 
-def _marketplace_search_query(lot: Lot) -> str:
+def _marketplace_search_query_full(lot: Lot) -> str:
     parts = [
         lot.cadastral_number,
         lot.address,
@@ -74,21 +85,57 @@ def _marketplace_search_query(lot: Lot) -> str:
     return ", ".join(str(p).strip() for p in parts if p and str(p).strip())
 
 
-def domclick_land_search_url(lot: Lot) -> str | None:
-    """Best-effort Domclick search; not a cadastral deep link."""
+def _marketplace_search_query_cadastral_only(lot: Lot) -> str | None:
+    c = (lot.cadastral_number or "").strip()
+    return c or None
+
+
+def _marketplace_url_from_template(template: str, query: str | None) -> str | None:
     if not settings.include_marketplace_search_urls:
         return None
-    q = _marketplace_search_query(lot)
+    q = (query or "").strip()
     if not q:
         return None
-    return f"https://domclick.ru/search?query={quote(q)}"
+    t = (template or "").strip()
+    if not t:
+        return None
+    enc = quote(q, safe="")
+    return t.format(q=enc)
+
+
+def domclick_land_search_url(lot: Lot) -> str | None:
+    """Best-effort Domclick search; not a cadastral deep link."""
+    return _marketplace_url_from_template(
+        settings.domclick_search_template, _marketplace_search_query_full(lot)
+    )
+
+
+def domclick_land_search_url_cadastral_only(lot: Lot) -> str | None:
+    return _marketplace_url_from_template(
+        settings.domclick_search_template, _marketplace_search_query_cadastral_only(lot)
+    )
 
 
 def avito_search_url(lot: Lot) -> str | None:
     """Best-effort Avito search for land listings."""
-    if not settings.include_marketplace_search_urls:
-        return None
-    q = _marketplace_search_query(lot)
-    if not q:
-        return None
-    return f"https://www.avito.ru/all/zemelnye_uchastki?q={quote(q)}"
+    return _marketplace_url_from_template(
+        settings.avito_land_search_template, _marketplace_search_query_full(lot)
+    )
+
+
+def avito_search_url_cadastral_only(lot: Lot) -> str | None:
+    return _marketplace_url_from_template(
+        settings.avito_land_search_template, _marketplace_search_query_cadastral_only(lot)
+    )
+
+
+def cian_land_search_url(lot: Lot) -> str | None:
+    return _marketplace_url_from_template(
+        settings.cian_land_search_template, _marketplace_search_query_full(lot)
+    )
+
+
+def cian_land_search_url_cadastral_only(lot: Lot) -> str | None:
+    return _marketplace_url_from_template(
+        settings.cian_land_search_template, _marketplace_search_query_cadastral_only(lot)
+    )

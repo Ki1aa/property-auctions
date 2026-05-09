@@ -9,11 +9,13 @@
 **Цель:** в списке и карточке лота видны дата/время ключевых этапов и ссылки на монитор, ГИС Торги (страница извещения при известном `regNum`, иначе JSON), ПКК по кадастру, опционально поиск на Домклик/Авито; в Telegram при `new_lot` / `changed_lot` то же плюс baseline.
 
 **Выполнено 2026-05-09:**
-- Backend: [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — генерация URL; настройки `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS` в [backend/app/config.py](backend/app/config.py); поля `app_lot_url`, `torgi_url`, `pkk_map_url`, `domclick_search_url`, `avito_search_url` в ответах `/api/lots` и `/api/lots/{id}`.
-- Telegram: HTML-сообщения с экранированием и ссылками ([backend/app/services/alerts/service.py](backend/app/services/alerts/service.py), [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py)).
+- Backend: [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — генерация URL; настройки `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS`, шаблоны `DOMCLICK_SEARCH_TEMPLATE`, `AVITO_LAND_SEARCH_TEMPLATE`, `CIAN_LAND_SEARCH_TEMPLATE` в [backend/app/config.py](backend/app/config.py); поля `app_lot_url`, `torgi_url`, `torgi_json_url` (второй href при отличии от HTML-карточки), `pkk_map_url`, пары ссылок Домклик/Авито/Циан — расширенный поиск и только кадастр (`*_cadastral`) в ответах `/api/lots` и `/api/lots/{id}`.
+- Telegram: HTML-сообщения с экранированием, две ссылки ГИС Торги при необходимости, маркетплейки с подписями; устойчивость: обрезка до `TELEGRAM_MAX_MESSAGE_LENGTH`, retry при 429, `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW` ([backend/app/services/alerts/service.py](backend/app/services/alerts/service.py), [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py)); smoke: `python scripts/send_telegram_test.py`.
 - Frontend: таблица `/lots` — даты со временем, колонка ссылок; карточка — блок «Ссылки» ([frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx)).
 
-**Ограничение:** ссылки Домклик/Авито — шаблонный поиск по кадастру/адресу/региону, не гарантированная «карта цен по участку». Точная интеграция — после разведки (задача E ниже) и/или НСПД.
+**Разведка URL агрегаторов (шаблонный поиск «по кадастру», без API карточки):** проверять с российского IP после смены вёрстки площадок. Текущие шаблоны в коде: Домклик — `domclick.ru/search?query={q}`; Авито — каталог `zemelnye_uchastki` с `q={q}`; Циан — `kupit-uchastok` с `text={q}`. Точность — как у текстового поиска площадки; при смене query-параметра достаточно поправить `.env` без релиза.
+
+**Ограничение:** ссылки Домклик/Авито/Циан — шаблонный поиск по кадастру и/или адресу/региону, не гарантированная «карта цен по участку». Точная интеграция — после официальных API/скрейпинга по согласованию и/или НСПД.
 
 ## 0. Делегирование ИИ с прямым доступом к РФ-ресурсам
 

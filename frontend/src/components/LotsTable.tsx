@@ -48,9 +48,17 @@ function LotLinksCell({ lot }: { lot: Lot }) {
   const external: { href: string; label: string }[] = [];
   if (lot.app_lot_url) external.push({ href: lot.app_lot_url, label: "Публичный URL" });
   if (lot.torgi_url) external.push({ href: lot.torgi_url, label: "ГИС Торги" });
+  if (lot.torgi_json_url) external.push({ href: lot.torgi_json_url, label: "Торги JSON" });
   if (pkk) external.push({ href: pkk, label: "ПКК" });
+  if (lot.domclick_search_url_cadastral)
+    external.push({ href: lot.domclick_search_url_cadastral, label: "Домклик (кад.)" });
   if (lot.domclick_search_url) external.push({ href: lot.domclick_search_url, label: "Домклик" });
+  if (lot.avito_search_url_cadastral)
+    external.push({ href: lot.avito_search_url_cadastral, label: "Авито (кад.)" });
   if (lot.avito_search_url) external.push({ href: lot.avito_search_url, label: "Авито" });
+  if (lot.cian_search_url_cadastral)
+    external.push({ href: lot.cian_search_url_cadastral, label: "Циан (кад.)" });
+  if (lot.cian_search_url) external.push({ href: lot.cian_search_url, label: "Циан" });
   return (
     <div className="lots-table__links">
       <Link to={`/lots/${lot.id}`} className="lots-table__ext-link">

@@ -76,7 +76,7 @@ backend/
         geometry.py          # EPSG:3857 centroid for map hints
       alerts/
         service.py     # notify_lot_event - дедупликация по AlertEvent, HTML + ссылки
-        telegram.py    # send_telegram_message (parse_mode, preview)
+        telegram.py    # send_telegram_message: truncate, retry 429, preview flag
   alembic/
     env.py
     versions/          # 7 миграций: init, opendata_notices, ingest_manifest, lot_land_fields, lot↔opendata_notice link, ingest observability, lot municipality fields
@@ -91,6 +91,7 @@ backend/
     link_lots_to_notices.py         # backfill Lot.opendata_notice_id по существующим парам href/reg_num
     repair_poisoned_ingest_manifests.py  # ingest_manifest: processed+0 при error-envelope или при несоответствии (живой URL непустой, в БД 0 записей)
     dev_sync_schema.py              # dev-only: ALTER TABLE + недостающие индексы для существующей SQLite; FK только предупреждением
+    send_telegram_test.py           # smoke: одно тестовое сообщение по TELEGRAM_* из .env
   tests/                            # pytest (api, ingest client/discovery/service/upsert, normalizer, detail_parser, retry, notice-link)
   requirements.txt
   alembic.ini
@@ -309,20 +310,20 @@ python scripts/repair_poisoned_ingest_manifests.py
 - **ИЖС-детектор** при наличии detail JSON использует код классификатора `characteristics[code=PermittedUse].characteristicValue[].code` с whitelist `2.1/2.2/2.3/13.1/13.2` и prefix-match; `IZHS_KEYWORDS` остаётся fallback'ом, когда кода нет.
 - **Маршрутизация OpenData documentType**: только `documentType=notice` создаёт/обновляет Lot; `noticeCancel/noticeStop/noticeResumption/noticeAnnulment` обновляют статус существующего Lot, `clarifications` сохраняется как OpenDataNotice и не создаёт пустой Lot.
 - **Связь Lot ↔ OpenDataNotice**: FK `Lot.opendata_notice_id`, ingest пишет обе таблицы атомарно, `/api/lots/{id}` возвращает `notice_payload` (raw opendata-извещение) - [backend/app/models.py](backend/app/models.py), [backend/app/api.py](backend/app/api.py).
-- REST API: `/health`, `/api/lots` (ответ `{ items, total, limit, offset }`; фильтры; `region` поддерживает один код, несколько повторяющихся query-параметров или строку с кодами через запятую; `sort`; `start_price_per_sotka` / `start_price_per_sqm` из извещения; `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`; `category` повторяющимся query для OR по видам торгов; сортировка `discount_to_baseline_desc`; фильтры качества `has_cadastral`, `has_price_per_sotka`, `has_positive_discount`), `GET /api/export/lots.csv` (те же фильтры + baseline-колонки), `/api/lots/facets`, `/api/lots/quality`, `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`, baseline-поля, `app_lot_url`/`torgi_url`/`pkk_map_url`/поиск Домклик/Авито при `INCLUDE_MARKETPLACE_SEARCH_URLS`), `/api/lots-map`, `/api/ingest-runs` (история запусков + `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`), `/api/ingest-status`, `POST /api/ingest-runs/start`, `/api/opendata-notices` (ответ `{ items, total, limit, offset }`; фильтры `document_type` / `bidd_type_code` списками и `reg_num`; `sort` по `publish_date`, `reg_num`, `document_type`, `bidd_type_code` с направлением asc/desc), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
+- REST API: `/health`, `/api/lots` (ответ `{ items, total, limit, offset }`; фильтры; `region` поддерживает один код, несколько повторяющихся query-параметров или строку с кодами через запятую; `sort`; `start_price_per_sotka` / `start_price_per_sqm` из извещения; `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`; `category` повторяющимся query для OR по видам торгов; сортировка `discount_to_baseline_desc`; фильтры качества `has_cadastral`, `has_price_per_sotka`, `has_positive_discount`), `GET /api/export/lots.csv` (те же фильтры + baseline-колонки), `/api/lots/facets`, `/api/lots/quality`, `/api/lots/{id}` (+ `notice_payload`, `opendata_notice_id`, baseline-поля, `app_lot_url`/`torgi_url`/`torgi_json_url`/`pkk_map_url`/поиск Домклик/Авито/Циан расширенный и «только кадастр» при `INCLUDE_MARKETPLACE_SEARCH_URLS`), `/api/lots-map`, `/api/ingest-runs` (история запусков + `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`), `/api/ingest-status`, `POST /api/ingest-runs/start`, `/api/opendata-notices` (ответ `{ items, total, limit, offset }`; фильтры `document_type` / `bidd_type_code` списками и `reg_num`; `sort` по `publish_date`, `reg_num`, `document_type`, `bidd_type_code` с направлением asc/desc), `/api/opendata-notices/facets` - [backend/app/api.py](backend/app/api.py).
 - Внутренняя baseline-оценка без внешних маркетплейсов: медиана ₽/сотка по каскаду `region+category -> region -> category -> global`, дисконт к baseline, confidence и reason; Dashboard показывает shortlist ИЖС-кандидатов по дисконту.
 - Наблюдаемость ingest: `IngestRun` и `IngestManifest` различают `source_unavailable`, `schema_migration_required`, `file_processing_error`; UI `/ingest` показывает обработанные/упавшие файлы и последний URL ошибки.
 - Планировщик ingest (APScheduler, по умолчанию раз в сутки) - [backend/app/scheduler.py](backend/app/scheduler.py).
-- Telegram-уведомления (дедупликация через AlertEvent; опционально только ИЖС — `TELEGRAM_ALERT_ONLY_IZHS`) - [backend/app/services/alerts/](backend/app/services/alerts).
+- Telegram-уведомления (дедупликация через AlertEvent; опционально только ИЖС — `TELEGRAM_ALERT_ONLY_IZHS`; обрезка длины, retry при 429, отключение превью ссылок; smoke `python scripts/send_telegram_test.py`) - [backend/app/services/alerts/](backend/app/services/alerts); пошаговая настройка в [README.md](README.md) (раздел Telegram-алерты).
 - Offline demo path: `python scripts/load_demo_tyumen_data.py --reset` загружает воспроизводимый набор Тюменской области из `data/raw` без live-сети.
 - Pytest: 55 тестов (API + baseline/quality metrics/ingest status/manual start, notice_payload, ingest client/discovery/service с region+detail+retry+notice-link+documentType events, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены/ВРИ + ФИАС).
 - SPA: страницы Dashboard (метрики качества данных + shortlist) / Notices (server-side пагинация по 50, фильтры document_type / bidd_type_code / reg_num, сортировка кликом по заголовкам) / Lots (пагинация, быстрые фильтры качества, сортировка по ₽/сотка, CSV, регион/муниципалитет/тип) / LotDetail / Map / IngestRuns (статус загрузки, расписание, ручной запуск) - [frontend/src/](frontend/src).
 - TypeScript-проверка чистая, frontend tests проходят, Vite production build проходит. MapLibre вынесен в отдельный async chunk; предупреждение о крупном chunk теперь относится к лениво загружаемой карте.
 
 **Не сделано / на паузе:**
-- НСПД: клиент и запись в `lots.nspd_*` при ingest при `NSPD_ENABLED` (сеть к `nspd.gov.ru`). Циан/Авито/Домклик как источники аналогов - не подключены.
+- НСПД: обогащение при ingest при `NSPD_ENABLED` (сеть к `nspd.gov.ru`). Циан/Авито/Домклик как источники **рыночных аналогов и оценки** - не подключены; шаблонные **поисковые** ссылки в API/Telegram есть.
 - Нет оценки рыночной стоимости по внешним аналогам и полноценного инвестиционного скоринга. Есть только внутренняя baseline-оценка по собственной базе торгов.
-- Telegram реально не настроен (`.env` содержит пустые `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`).
+- По умолчанию в dev `.env` часто пустые `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — см. README, раздел Telegram-алерты.
 - Нет линтеров в CI (есть pytest + frontend `tsc` + `npm run test` + `npm run build`).
 - Frontend имеет базовый ErrorBoundary; точечные пустые/error states есть на ключевых страницах, но их можно расширять.
 - Реальный замер выигрыша coverage от текстовых fallback'ов парсера возможен только при VPN-off.

@@ -476,9 +476,14 @@ def test_lot_detail_returns_notice_payload_when_linked():
     assert body["notice_payload"]["regNum"] == "72000000000000000123"
     assert body["notice_payload"]["extra"] == "raw"
     assert body["torgi_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
+    assert body["torgi_json_url"] == "https://torgi.gov.ru/new/api/public/lot/notice.json"
     assert body["pkk_map_url"] is not None and "pkk.rosreestr.ru" in body["pkk_map_url"]
     assert body["domclick_search_url"] is not None and "domclick.ru" in body["domclick_search_url"]
+    assert body["domclick_search_url_cadastral"] is not None and "domclick.ru" in body["domclick_search_url_cadastral"]
     assert body["avito_search_url"] is not None and "avito.ru" in body["avito_search_url"]
+    assert body["avito_search_url_cadastral"] is not None and "avito.ru" in body["avito_search_url_cadastral"]
+    assert body["cian_search_url"] is not None and "cian.ru" in body["cian_search_url"]
+    assert body["cian_search_url_cadastral"] is not None and "cian.ru" in body["cian_search_url_cadastral"]
 
 
 def test_lot_detail_returns_null_notice_payload_when_not_linked():

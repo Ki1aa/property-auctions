@@ -30,10 +30,20 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     # When true, Telegram alerts are sent only for lots with is_izhs_candidate.
     telegram_alert_only_izhs: bool = False
+    # Telegram sendMessage: hide link preview on the first URL (alerts stay compact).
+    telegram_disable_web_page_preview: bool = True
+    # Hard cap for Bot API text length (Telegram limit is 4096).
+    telegram_max_message_length: int = 4096
+    # Extra attempts when Telegram returns HTTP 429 (rate limit).
+    telegram_send_max_retries: int = 2
     # Base URL of the SPA (no trailing slash), e.g. https://monitor.example.com — for Telegram and API deep links.
     app_public_base_url: str = ""
-    # Best-effort Domclick/Avito search URLs from cadastral/address; disable if you want fewer outbound links.
+    # Best-effort Domclick/Avito/Cian search URLs from cadastral/address; disable if you want fewer outbound links.
     include_marketplace_search_urls: bool = True
+    # Marketplace listing search templates; `{q}` is replaced with URL-encoded query (see external_lot_links).
+    domclick_search_template: str = "https://domclick.ru/search?query={q}"
+    avito_land_search_template: str = "https://www.avito.ru/all/zemelnye_uchastki?q={q}"
+    cian_land_search_template: str = "https://www.cian.ru/kupit-uchastok/?text={q}"
 
     # NSPD geoportal (nspd.gov.ru). Off by default; enable when server has route to RU endpoints.
     nspd_enabled: bool = False

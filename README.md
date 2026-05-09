@@ -124,6 +124,18 @@ alembic current
 - `POST /api/ingest-runs/start` - ручной запуск operational ingest в фоне; если загрузка уже идёт, возвращает `started=false`.
 - `GET /api/opendata-notices` - страница извещений: JSON `{ items, total, limit, offset }` с фильтрами `document_type/bidd_type_code/reg_num`, пагинацией `limit`/`offset` и серверной сортировкой `sort` (`publish_date_desc`, `publish_date_asc`, `reg_num_asc`, `reg_num_desc`, `document_type_asc`, `document_type_desc`, `bidd_type_code_asc`, `bidd_type_code_desc`).
 
+## Telegram-алерты
+
+После ingest при событиях `new_lot` / `changed_lot` backend может отправить сообщение в Telegram (HTML, ссылки на монитор, ГИС Торги, ПКК, опционально поиск на Домклик/Авито/Циан).
+
+1. Создайте бота в [@BotFather](https://t.me/BotFather), получите `TELEGRAM_BOT_TOKEN`.
+2. Узнайте `TELEGRAM_CHAT_ID`: для личного чата напишите боту `/start`, затем используйте [@userinfobot](https://t.me/userinfobot) или `getUpdates` у Bot API; для канала добавьте бота администратором, id обычно вида `-100...`.
+3. Пропишите переменные в `.env` (см. [.env.example](.env.example)). Для ссылки «Монитор» в алерте задайте `APP_PUBLIC_BASE_URL` (публичный URL SPA без слэша в конце).
+4. Проверка без ingest: из каталога `backend` выполните `python scripts/send_telegram_test.py` (сообщение по умолчанию можно заменить флагом `--text`).
+5. Типичные ошибки Bot API: **403 Forbidden** — бот не может писать в чат (не нажали `/start` в личке, бот не админ в канале, неверный `chat_id`); **401** — неверный токен. Чтобы сократить шум, включите `TELEGRAM_ALERT_ONLY_IZHS=true` (только лоты-кандидаты ИЖС).
+
+Дополнительно: `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW`, лимит длины и повтор при 429 — в `.env.example`.
+
 ## Тесты
 
 В каталоге `backend`:

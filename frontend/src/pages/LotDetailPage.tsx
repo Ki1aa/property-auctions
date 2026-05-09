@@ -104,7 +104,7 @@ export function LotDetailPage() {
     lot.cadastral_number || lot.area_sqm !== null || lot.land_category || lot.permitted_use || lot.address;
 
   const pkkHref = lot.pkk_map_url ?? pkkMapUrl(lot.cadastral_number);
-  const jsonNoticeHref = lot.notice_detail_url || lot.source_url;
+  const jsonNoticeHref = lot.torgi_json_url || lot.notice_detail_url || lot.source_url;
 
   return (
     <div className="page">
@@ -148,7 +148,16 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
-          {jsonNoticeHref && jsonNoticeHref !== lot.torgi_url ? (
+          {lot.torgi_json_url ? (
+            <div className="card__row">
+              <span className="card__label">JSON извещения</span>
+              <span>
+                <a href={lot.torgi_json_url} target="_blank" rel="noreferrer">
+                  Скачать / открыть JSON
+                </a>
+              </span>
+            </div>
+          ) : jsonNoticeHref && jsonNoticeHref !== lot.torgi_url ? (
             <div className="card__row">
               <span className="card__label">JSON извещения</span>
               <span>
@@ -168,9 +177,19 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
+          {lot.domclick_search_url_cadastral ? (
+            <div className="card__row">
+              <span className="card__label">Домклик (кадастр)</span>
+              <span>
+                <a href={lot.domclick_search_url_cadastral} target="_blank" rel="noreferrer">
+                  Поиск по кадастровому номеру
+                </a>
+              </span>
+            </div>
+          ) : null}
           {lot.domclick_search_url ? (
             <div className="card__row">
-              <span className="card__label">Домклик</span>
+              <span className="card__label">Домклик (расширенный)</span>
               <span>
                 <a href={lot.domclick_search_url} target="_blank" rel="noreferrer">
                   Поиск участков (оценочно)
@@ -178,9 +197,19 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
+          {lot.avito_search_url_cadastral ? (
+            <div className="card__row">
+              <span className="card__label">Авито (кадастр)</span>
+              <span>
+                <a href={lot.avito_search_url_cadastral} target="_blank" rel="noreferrer">
+                  Поиск по кадастровому номеру
+                </a>
+              </span>
+            </div>
+          ) : null}
           {lot.avito_search_url ? (
             <div className="card__row">
-              <span className="card__label">Авито</span>
+              <span className="card__label">Авито (расширенный)</span>
               <span>
                 <a href={lot.avito_search_url} target="_blank" rel="noreferrer">
                   Поиск участков (оценочно)
@@ -188,10 +217,35 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
-          {(lot.domclick_search_url || lot.avito_search_url) && (
+          {lot.cian_search_url_cadastral ? (
+            <div className="card__row">
+              <span className="card__label">Циан (кадастр)</span>
+              <span>
+                <a href={lot.cian_search_url_cadastral} target="_blank" rel="noreferrer">
+                  Поиск по кадастровому номеру
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.cian_search_url ? (
+            <div className="card__row">
+              <span className="card__label">Циан (расширенный)</span>
+              <span>
+                <a href={lot.cian_search_url} target="_blank" rel="noreferrer">
+                  Поиск участков (оценочно)
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {(lot.domclick_search_url ||
+            lot.domclick_search_url_cadastral ||
+            lot.avito_search_url ||
+            lot.avito_search_url_cadastral ||
+            lot.cian_search_url ||
+            lot.cian_search_url_cadastral) && (
             <p className="card__footnote">
-              Ссылки на Домклик и Авито ведут в общий поиск по адресу и кадастру; это не официальная карта цен по
-              конкретному участку.
+              Ссылки на Домклик, Авито и Циан ведут в общий текстовый поиск (кадастр и/или адрес); это не официальная
+              карточка участка и не оценка рынка.
             </p>
           )}
         </div>

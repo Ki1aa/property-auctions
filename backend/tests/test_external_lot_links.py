@@ -57,3 +57,44 @@ def test_marketplace_disabled(monkeypatch):
     lot = _lot(cadastral_number="72:01:1:1", region="72")
     assert links.domclick_land_search_url(lot) is None
     assert links.avito_search_url(lot) is None
+
+
+def test_torgi_json_link_when_distinct_requires_html_and_differs():
+    lot = _lot(
+        source_id="72000000000000000123",
+        notice_detail_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
+    )
+    payload = {"regNum": "72000000000000000123"}
+    assert links.torgi_notice_json_link_when_distinct(lot, payload) == lot.notice_detail_url
+
+
+def test_torgi_json_link_none_when_only_json():
+    lot = _lot(source_id="x", source_url="https://torgi.gov.ru/only.json", notice_detail_url=None)
+    assert links.torgi_notice_json_link_when_distinct(lot, None) is None
+
+
+def test_cadastral_only_search_urls(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", True)
+    lot = _lot(
+        source_id="72000000000000000123",
+        cadastral_number="72:01:1:1",
+        address="ул. Тестовая",
+        municipality="Тюмень",
+        region="72",
+    )
+    d = links.domclick_land_search_url_cadastral_only(lot)
+    a = links.avito_search_url_cadastral_only(lot)
+    c = links.cian_land_search_url_cadastral_only(lot)
+    assert d is not None and "domclick.ru" in d
+    assert a is not None and "avito.ru" in a
+    assert c is not None and "cian.ru" in c
+    assert "Тестовая" not in (d or "")
+    assert "Тестовая" not in (a or "")
+    assert "Тестовая" not in (c or "")
+
+
+def test_cian_disabled_when_template_empty(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", True)
+    monkeypatch.setattr(links.settings, "cian_land_search_template", "")
+    lot = _lot(cadastral_number="72:01:1:1", region="72")
+    assert links.cian_land_search_url(lot) is None

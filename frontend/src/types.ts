@@ -64,9 +64,15 @@ export type Lot = {
   valuation_reason: string | null;
   app_lot_url: string | null;
   torgi_url: string | null;
+  /** Raw notice JSON href when it differs from the HTML notice page. */
+  torgi_json_url: string | null;
   pkk_map_url: string | null;
   domclick_search_url: string | null;
+  domclick_search_url_cadastral: string | null;
   avito_search_url: string | null;
+  avito_search_url_cadastral: string | null;
+  cian_search_url: string | null;
+  cian_search_url_cadastral: string | null;
 };
 
 export type LotListPage = {

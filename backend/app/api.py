@@ -14,8 +14,13 @@ from app.config import settings
 from app.services.external_lot_links import (
     app_public_lot_url,
     avito_search_url,
+    avito_search_url_cadastral_only,
+    cian_land_search_url,
+    cian_land_search_url_cadastral_only,
     domclick_land_search_url,
+    domclick_land_search_url_cadastral_only,
     pkk_map_url,
+    torgi_notice_json_link_when_distinct,
     torgi_public_url,
 )
 from app.services.lot_baseline import (
@@ -107,9 +112,14 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         valuation_reason=valuation.valuation_reason,
         app_lot_url=app_public_lot_url(lot.id),
         torgi_url=torgi_public_url(lot, None),
+        torgi_json_url=torgi_notice_json_link_when_distinct(lot, None),
         pkk_map_url=pkk_map_url(lot.cadastral_number),
         domclick_search_url=domclick_land_search_url(lot),
+        domclick_search_url_cadastral=domclick_land_search_url_cadastral_only(lot),
         avito_search_url=avito_search_url(lot),
+        avito_search_url_cadastral=avito_search_url_cadastral_only(lot),
+        cian_search_url=cian_land_search_url(lot),
+        cian_search_url_cadastral=cian_land_search_url_cadastral_only(lot),
     )
 
 
@@ -484,6 +494,7 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
     list_base = _lot_list_item(lot, valuation)
     list_fields = list_base.model_dump()
     list_fields["torgi_url"] = torgi_public_url(lot, notice_payload)
+    list_fields["torgi_json_url"] = torgi_notice_json_link_when_distinct(lot, notice_payload)
     return LotDetail(
         **list_fields,
         latitude=lot.latitude,

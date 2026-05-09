@@ -76,3 +76,5 @@ def test_notify_lot_event_sends_html_with_links(monkeypatch, db_session):
     assert "https://app.example/lots/" in sent["text"]
     assert "torgi.gov.ru" in sent["text"]
     assert "pkk.rosreestr.ru" in sent["text"]
+    assert "cian.ru" in sent["text"]
+    assert sent["kwargs"].get("disable_web_page_preview") is True

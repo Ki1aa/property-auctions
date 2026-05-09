@@ -36,9 +36,14 @@ class LotListItem(BaseModel):
     # Deep links (see external_lot_links); marketplace URLs are best-effort search, not cadastral maps.
     app_lot_url: str | None = None
     torgi_url: str | None = None
+    torgi_json_url: str | None = None
     pkk_map_url: str | None = None
     domclick_search_url: str | None = None
+    domclick_search_url_cadastral: str | None = None
     avito_search_url: str | None = None
+    avito_search_url_cadastral: str | None = None
+    cian_search_url: str | None = None
+    cian_search_url_cadastral: str | None = None
 
 
 class LotListPage(BaseModel):

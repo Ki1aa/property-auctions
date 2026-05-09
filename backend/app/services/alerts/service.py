@@ -11,8 +11,14 @@ from app.services.alerts.telegram import send_telegram_message
 from app.services.external_lot_links import (
     app_public_lot_url,
     avito_search_url,
+    avito_search_url_cadastral_only,
+    cian_land_search_url,
+    cian_land_search_url_cadastral_only,
     domclick_land_search_url,
+    domclick_land_search_url_cadastral_only,
     pkk_map_url,
+    torgi_notice_html_url,
+    torgi_notice_json_link_when_distinct,
     torgi_public_url,
 )
 
@@ -23,6 +29,20 @@ def _esc_html_text(value: object) -> str:
 
 def _esc_html_attr(value: str) -> str:
     return html.escape(value, quote=True)
+
+
+def _append_unique_link(
+    parts: list[str],
+    seen: set[str],
+    href: str | None,
+    label: str,
+) -> None:
+    if not href:
+        return
+    if href in seen:
+        return
+    seen.add(href)
+    parts.append(f'<a href="{_esc_html_attr(href)}">{_esc_html_text(label)}</a>')
 
 
 async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str) -> None:
@@ -51,10 +71,15 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
             notice_payload = notice.payload
 
     t_url = torgi_public_url(lot, notice_payload)
+    t_json = torgi_notice_json_link_when_distinct(lot, notice_payload)
     pkk = pkk_map_url(lot.cadastral_number)
     app_u = app_public_lot_url(lot.id)
     dom = domclick_land_search_url(lot)
+    dom_cad = domclick_land_search_url_cadastral_only(lot)
     avi = avito_search_url(lot)
+    avi_cad = avito_search_url_cadastral_only(lot)
+    cian = cian_land_search_url(lot)
+    cian_cad = cian_land_search_url_cadastral_only(lot)
 
     lines: list[str] = [
         f"<b>{_esc_html_text(event_type)}</b>",
@@ -77,17 +102,25 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     lines.append("")
     lines.append("Ссылки:")
     link_parts: list[str] = []
-    if app_u:
-        link_parts.append(f'<a href="{_esc_html_attr(app_u)}">Монитор</a>')
-    if t_url:
-        link_parts.append(f'<a href="{_esc_html_attr(t_url)}">ГИС Торги</a>')
-    if pkk:
-        link_parts.append(f'<a href="{_esc_html_attr(pkk)}">ПКК</a>')
-    if dom:
-        link_parts.append(f'<a href="{_esc_html_attr(dom)}">Домклик (поиск)</a>')
-    if avi:
-        link_parts.append(f'<a href="{_esc_html_attr(avi)}">Авито (поиск)</a>')
+    seen_urls: set[str] = set()
+    _append_unique_link(link_parts, seen_urls, app_u, "Монитор")
+    torgi_primary_label = "ГИС Торги (страница)" if torgi_notice_html_url(lot, notice_payload) else "ГИС Торги"
+    _append_unique_link(link_parts, seen_urls, t_url, torgi_primary_label)
+    _append_unique_link(link_parts, seen_urls, t_json, "ГИС Торги (JSON)")
+    _append_unique_link(link_parts, seen_urls, pkk, "ПКК")
+    if settings.include_marketplace_search_urls:
+        _append_unique_link(link_parts, seen_urls, dom_cad, "Домклик (поиск, кадастр)")
+        _append_unique_link(link_parts, seen_urls, dom, "Домклик (поиск, расширенный)")
+        _append_unique_link(link_parts, seen_urls, avi_cad, "Авито (поиск, кадастр)")
+        _append_unique_link(link_parts, seen_urls, avi, "Авито (поиск, расширенный)")
+        _append_unique_link(link_parts, seen_urls, cian_cad, "Циан (поиск, кадастр)")
+        _append_unique_link(link_parts, seen_urls, cian, "Циан (поиск, расширенный)")
     lines.append(" | ".join(link_parts) if link_parts else "—")
+    if settings.include_marketplace_search_urls:
+        lines.append("")
+        lines.append(
+            "<i>Площадки: шаблонный поиск по кадастру/адресу; не гарантирует карточку участка.</i>"
+        )
 
     message = "\n".join(lines)
     await send_telegram_message(
@@ -95,5 +128,6 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
         settings.telegram_chat_id,
         message,
         parse_mode="HTML",
+        disable_web_page_preview=settings.telegram_disable_web_page_preview,
     )
     db.add(AlertEvent(lot_id=lot.id, event_type=event_type, event_hash=event_hash))

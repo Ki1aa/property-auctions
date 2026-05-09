@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-05-09 - Telegram-алерты: ссылки Торги/маркетплейсы, устойчивость отправки
+
+**Что сделано:**
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): вторая ссылка `torgi_notice_json_link_when_distinct`; пары URL Домклик/Авито/Циан — расширенный запрос и только кадастр; настраиваемые шаблоны `DOMCLICK_SEARCH_TEMPLATE`, `AVITO_LAND_SEARCH_TEMPLATE`, `CIAN_LAND_SEARCH_TEMPLATE`.
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW`, `TELEGRAM_MAX_MESSAGE_LENGTH`, `TELEGRAM_SEND_MAX_RETRIES`.
+- [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py): обрезка текста, retry при HTTP 429.
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): HTML-алерт с двумя ссылками ГИС Торги при необходимости, маркетплейки с подписями и дедупликацией одинаковых URL.
+- API [backend/app/schemas.py](backend/app/schemas.py), [backend/app/api.py](backend/app/api.py): поля `torgi_json_url`, `*_cadastral`, `cian_*`.
+- Скрипт проверки доставки [backend/scripts/send_telegram_test.py](backend/scripts/send_telegram_test.py).
+- Документация: [README.md](README.md) (раздел Telegram), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) (шаблоны агрегаторов), [AGENTS.md](AGENTS.md).
+- Фронт: [frontend/src/types.ts](frontend/src/types.ts), [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx).
+
+**Проверки:**
+- `python -m pytest`: 74 passed.
+- `npx tsc --noEmit`: ок.
+
+**Следующее:** при смене URL площадок — правка шаблонов в `.env`; smart-алерты по порогу discount/score (roadmap).
+
+---
+
 ## 2026-05-09 - НСПД: поля в БД, обогащение при ingest, UI карточки
 
 **Что сделано:**
