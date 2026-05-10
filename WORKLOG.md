@@ -6,6 +6,12 @@
 
 ---
 
+## 2026-05-12 - Git: `main` на GitHub выровнен под `codex/gis_torgi_v2`
+
+**Что сделано:** Локально `main` сброшен на тот же коммит, что рабочая ветка (`git reset --hard codex/gis_torgi_v2`), на GitHub выполнен `git push origin main --force-with-lease` (`579cb90` → `481c345`). Конфликтный merge `main` + `codex/gis_torgi_v2` отменён: единый источник правды — состояние ветки разработки.
+
+---
+
 ## 2026-05-12 - CI: Alembic `ModuleNotFoundError: app` при `upgrade head`
 
 **Что сделано:** В [`backend/alembic/env.py`](backend/alembic/env.py) перед импортом `app.*` в `sys.path` добавлен корень `backend/` (родитель каталога `alembic/`). В [`.github/workflows/ci.yml`](.github/workflows/ci.yml) для job `migrations` задан `PYTHONPATH: ${{ github.workspace }}/backend`.
