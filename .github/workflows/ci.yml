@@ -39,6 +39,7 @@ jobs:
         working-directory: backend
     env:
       DATABASE_URL: postgresql+psycopg://gis_user:gis_password@localhost:5432/gis_torgi
+      PYTHONPATH: ${{ github.workspace }}/backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

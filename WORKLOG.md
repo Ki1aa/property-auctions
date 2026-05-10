@@ -6,6 +6,14 @@
 
 ---
 
+## 2026-05-12 - CI: Alembic `ModuleNotFoundError: app` при `upgrade head`
+
+**Что сделано:** В [`backend/alembic/env.py`](backend/alembic/env.py) перед импортом `app.*` в `sys.path` добавлен корень `backend/` (родитель каталога `alembic/`). В [`.github/workflows/ci.yml`](.github/workflows/ci.yml) для job `migrations` задан `PYTHONPATH: ${{ github.workspace }}/backend`.
+
+**Проверки:** `pytest` — 132 passed.
+
+---
+
 ## 2026-05-12 - Лот vs извещение: заголовок строки и ingest title
 
 **Что сделано:** `lot_preferred_list_title` перед fallback на `lots.title` отдаёт `Лот {N} · {regNum}` (и для мультилота без кадастра то же вместо голого «Лот N»). OpenData-ветка `normalize_lot`: в `title` не пишется `noticeName` — приоритет `lots[].lotName`/name, иначе `Лот 1 · {regNum}`. Detail multi-lot без `lotName`: `Лот {N} · {regNum}` вместо склейки с прежним `normalized['title']`. Экспорт CSV и `/api/lots-map` используют preferred title (CSV с batch последних snapshot). Тесты: `test_lot_identity`, `test_normalizer_notices`.

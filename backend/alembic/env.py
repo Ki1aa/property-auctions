@@ -1,4 +1,11 @@
+import sys
 from logging.config import fileConfig
+from pathlib import Path
+
+# Alembic loads this file directly; ensure `backend/` is importable as package root.
+_backend_root = Path(__file__).resolve().parents[1]
+if str(_backend_root) not in sys.path:
+    sys.path.insert(0, str(_backend_root))
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
