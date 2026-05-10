@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from dateutil import parser as date_parser
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -22,6 +22,39 @@ logger = logging.getLogger(__name__)
 
 DETAIL_FETCH_RETRY_BACKOFF_SEC = 1.5
 STRUCTURE_VERSION_RE = re.compile(r"structure-(\d+)")
+LAND_BIDDING_TYPE_CODES = frozenset(("ZK",))
+LAND_PLOT_TEXT_MARKERS = (
+    "земельный участок",
+    "земельного участка",
+    "земельные участки",
+    "земельных участков",
+    "земельному участку",
+    "земельным участком",
+    "зем. участок",
+    "з/у",
+)
+LAND_CATEGORY_MARKERS = (
+    "земли насел",
+    "земли сельскохозяй",
+    "земли специального назначения",
+    "земельные участки",
+)
+NON_LAND_ASSET_MARKERS = (
+    "автомоб",
+    "автобус",
+    "мототех",
+    "спецтех",
+    "транспорт",
+    "древесин",
+    "лесных насаждений",
+    "заготовк",
+    "нежил",
+    "здани",
+    "помещен",
+    "гараж",
+    "машиномест",
+    "объект незавершенного",
+)
 LOT_CREATING_OPENDATA_DOCUMENT_TYPES = frozenset(("notice",))
 OPENDATA_EVENT_STATUS = {
     "noticeCancel": "CANCELED",
@@ -104,6 +137,42 @@ def _passes_region_filter(normalized: dict, allowed: set[str]) -> bool:
         return True
     region = normalized.get("region")
     return region is not None and str(region).strip() in allowed
+
+
+def _text_contains_any(value: Any, markers: tuple[str, ...]) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.lower()
+    return any(marker in text for marker in markers)
+
+
+def _has_land_plot_marker(normalized: dict) -> bool:
+    if any(
+        _text_contains_any(normalized.get(field), LAND_PLOT_TEXT_MARKERS)
+        for field in ("title", "permitted_use", "address")
+    ):
+        return True
+    return _text_contains_any(normalized.get("land_category"), LAND_CATEGORY_MARKERS)
+
+
+def _has_non_land_asset_marker(normalized: dict) -> bool:
+    return any(
+        _text_contains_any(normalized.get(field), NON_LAND_ASSET_MARKERS)
+        for field in ("title", "land_category", "permitted_use")
+    )
+
+
+def _is_land_lot_candidate(normalized: dict) -> bool:
+    if not settings.ingest_only_land_lots:
+        return True
+    if _has_non_land_asset_marker(normalized) and not normalized.get("is_izhs_candidate"):
+        return False
+    category = str(normalized.get("category") or "").strip()
+    if category in LAND_BIDDING_TYPE_CODES:
+        return _has_land_plot_marker(normalized) or not normalized.get("land_category")
+    if normalized.get("is_izhs_candidate"):
+        return True
+    return _has_land_plot_marker(normalized)
 
 
 def _is_manifest_processed(db: Session, source_url: str, sha256: str) -> bool:
@@ -231,18 +300,26 @@ def _apply_opendata_event_to_existing_lot(
     if not isinstance(source_id, str) or not source_id:
         return False
 
-    lot = db.scalar(select(Lot).where(Lot.source_id == source_id))
-    if lot is None:
+    lots = db.scalars(
+        select(Lot).where(
+            or_(
+                Lot.source_id == source_id,
+                Lot.source_id.like(f"{source_id}:lot:%"),
+            )
+        )
+    ).all()
+    if not lots:
         return False
 
     changed = False
     new_status = OPENDATA_EVENT_STATUS.get(document_type or "")
-    if new_status and lot.status != new_status:
-        lot.status = new_status
-        changed = True
-    if opendata_notice_id is not None and lot.opendata_notice_id is None:
-        lot.opendata_notice_id = opendata_notice_id
-        changed = True
+    for lot in lots:
+        if new_status and lot.status != new_status:
+            lot.status = new_status
+            changed = True
+        if opendata_notice_id is not None and lot.opendata_notice_id is None:
+            lot.opendata_notice_id = opendata_notice_id
+            changed = True
     if changed:
         db.commit()
     return changed
@@ -362,20 +439,23 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
                             changed_count += 1
                         continue
 
-                    detail_fetch_count = await _maybe_enrich_with_detail(
+                    detail_fetch_count, normalized_lots = await _maybe_enrich_with_detail(
                         normalized,
                         izhs_keywords=izhs_keywords,
                         already_fetched=detail_fetch_count,
                     )
-                    if not _passes_region_filter(normalized, allowed_regions):
-                        continue
-                    is_changed = await _upsert_lot(
-                        db, normalized, opendata_notice_id=notice_id, nspd_budget=nspd_budget
-                    )
-                    file_upserted += 1
-                    upserted_count += 1
-                    if is_changed:
-                        changed_count += 1
+                    for lot_normalized in normalized_lots:
+                        if not _passes_region_filter(lot_normalized, allowed_regions):
+                            continue
+                        if not _is_land_lot_candidate(lot_normalized):
+                            continue
+                        is_changed = await _upsert_lot(
+                            db, lot_normalized, opendata_notice_id=notice_id, nspd_budget=nspd_budget
+                        )
+                        file_upserted += 1
+                        upserted_count += 1
+                        if is_changed:
+                            changed_count += 1
 
                 _write_manifest(
                     db,
@@ -474,54 +554,160 @@ async def _fetch_detail_with_retry(detail_url: str) -> dict:
         return await fetch_json_payload(detail_url)
 
 
+def _detail_notice_object(detail: Any) -> dict[str, Any] | None:
+    if not isinstance(detail, dict):
+        return None
+    export_object = detail.get("exportObject")
+    if isinstance(export_object, dict):
+        structured = export_object.get("structuredObject")
+        if isinstance(structured, dict):
+            notice = structured.get("notice")
+            if isinstance(notice, dict):
+                return notice
+    return detail
+
+
+def _detail_notice_lots(detail: Any) -> list[dict[str, Any]]:
+    notice = _detail_notice_object(detail)
+    if not notice:
+        return []
+    lots = notice.get("lots")
+    if not isinstance(lots, list):
+        return []
+    return [lot for lot in lots if isinstance(lot, dict)]
+
+
+def _scoped_detail_for_lot(detail: Any, lot_payload: dict[str, Any]) -> dict[str, Any]:
+    notice = _detail_notice_object(detail)
+    if not notice:
+        return {"lots": [lot_payload]}
+    notice_scope = {key: value for key, value in notice.items() if key != "lots"}
+    notice_scope["lots"] = [lot_payload]
+    return {"notice": notice_scope}
+
+
+def _lot_number(lot_payload: dict[str, Any], index: int) -> str:
+    raw = lot_payload.get("lotNumber")
+    if raw is None or str(raw).strip() == "":
+        return str(index + 1)
+    return str(raw).strip()
+
+
+def _raw_for_detail_lot(
+    base_raw: Any,
+    *,
+    detail_url: str,
+    lot_payload: dict[str, Any],
+    index: int,
+    total: int,
+) -> dict[str, Any]:
+    raw = dict(base_raw) if isinstance(base_raw, dict) else {"value": base_raw}
+    raw["_notice_detail_url"] = detail_url
+    raw["_notice_lot_index"] = index
+    raw["_notice_lot_count"] = total
+    raw["_notice_lot"] = lot_payload
+    return raw
+
+
+def _expanded_normalized_lots_from_detail(
+    normalized: dict,
+    detail: Any,
+    *,
+    detail_url: str,
+    izhs_keywords: list[str],
+) -> list[dict]:
+    detail_lots = _detail_notice_lots(detail)
+    if not detail_lots:
+        detail_lots = [{}]
+
+    expanded: list[dict] = []
+    total = len(detail_lots)
+    base_source_id = str(normalized.get("source_id") or "")
+    for index, lot_payload in enumerate(detail_lots):
+        scoped_detail = _scoped_detail_for_lot(detail, lot_payload) if lot_payload else detail
+        parsed = parse_notice_detail(scoped_detail)
+        lot_number = _lot_number(lot_payload, index)
+
+        lot_normalized = dict(normalized)
+        lot_normalized["organizer"] = dict(normalized["organizer"])
+        if total > 1 and index > 0:
+            lot_normalized["source_id"] = f"{base_source_id}:lot:{lot_number}"
+        lot_normalized["raw"] = _raw_for_detail_lot(
+            normalized.get("raw"),
+            detail_url=detail_url,
+            lot_payload=lot_payload,
+            index=index,
+            total=total,
+        )
+        lot_normalized["notice_detail_url"] = detail_url
+
+        lot_title = (
+            str(lot_payload.get("lotName") or "").strip()
+            or str(lot_payload.get("lotDescription") or "").strip()
+            or parsed.get("lot_name")
+        )
+        if lot_title:
+            lot_normalized["title"] = lot_title
+        elif total > 1:
+            lot_normalized["title"] = f"{normalized['title']} - лот {lot_number}"
+
+        lot_normalized["cadastral_number"] = parsed.get("cadastral_number")
+        lot_normalized["area_sqm"] = parsed.get("area_sqm")
+        lot_normalized["land_category"] = parsed.get("land_category")
+        lot_normalized["permitted_use"] = parsed.get("permitted_use")
+        permitted_use_codes = parsed.get("permitted_use_codes")
+        if isinstance(permitted_use_codes, list):
+            lot_normalized["permitted_use_codes"] = ", ".join(str(code) for code in permitted_use_codes if code)
+        lot_normalized["address"] = parsed.get("address")
+        lot_normalized["municipality"] = parsed.get("municipality")
+        lot_normalized["settlement"] = parsed.get("settlement")
+        if parsed.get("subject_region_code"):
+            lot_normalized["region"] = parsed["subject_region_code"]
+        if parsed.get("start_price") is not None and not lot_normalized.get("start_price"):
+            lot_normalized["start_price"] = parsed["start_price"]
+        lot_normalized["is_izhs_candidate"] = match_izhs(scoped_detail, izhs_keywords)
+        expanded.append(lot_normalized)
+
+    return expanded
+
+
 async def _maybe_enrich_with_detail(
     normalized: dict,
     *,
     izhs_keywords: list[str],
     already_fetched: int,
-) -> int:
+) -> tuple[int, list[dict]]:
     """Fetch notice detail JSON and merge cadastral fields into normalized.
 
     Returns updated counter of detail fetches (caller passes it back).
     """
     if not settings.ingest_fetch_notice_details:
         normalized.setdefault("is_izhs_candidate", False)
-        return already_fetched
+        return already_fetched, [normalized]
     if already_fetched >= settings.ingest_detail_max_per_run:
         normalized.setdefault("is_izhs_candidate", False)
-        return already_fetched
+        return already_fetched, [normalized]
     detail_url = normalized.get("source_url")
     if not detail_url:
         normalized.setdefault("is_izhs_candidate", False)
-        return already_fetched
+        return already_fetched, [normalized]
 
     try:
         detail = await _fetch_detail_with_retry(detail_url)
     except Exception as exc:  # noqa: BLE001
         logger.warning("Detail fetch failed for %s: %s", detail_url, exc)
         normalized.setdefault("is_izhs_candidate", False)
-        return already_fetched
+        return already_fetched, [normalized]
 
-    parsed = parse_notice_detail(detail)
-    normalized["cadastral_number"] = parsed.get("cadastral_number")
-    normalized["area_sqm"] = parsed.get("area_sqm")
-    normalized["land_category"] = parsed.get("land_category")
-    normalized["permitted_use"] = parsed.get("permitted_use")
-    permitted_use_codes = parsed.get("permitted_use_codes")
-    if isinstance(permitted_use_codes, list):
-        normalized["permitted_use_codes"] = ", ".join(str(code) for code in permitted_use_codes if code)
-    normalized["address"] = parsed.get("address")
-    normalized["municipality"] = parsed.get("municipality")
-    normalized["settlement"] = parsed.get("settlement")
-    normalized["notice_detail_url"] = detail_url
-    if parsed.get("subject_region_code"):
-        normalized["region"] = parsed["subject_region_code"]
-    if parsed.get("lot_name"):
-        normalized["title"] = parsed["lot_name"]
-    if parsed.get("start_price") is not None and not normalized.get("start_price"):
-        normalized["start_price"] = parsed["start_price"]
-    normalized["is_izhs_candidate"] = match_izhs(detail, izhs_keywords)
-    return already_fetched + 1
+    return (
+        already_fetched + 1,
+        _expanded_normalized_lots_from_detail(
+            normalized,
+            detail,
+            detail_url=detail_url,
+            izhs_keywords=izhs_keywords,
+        ),
+    )
 
 
 async def _upsert_lot(

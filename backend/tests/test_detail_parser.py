@@ -355,6 +355,28 @@ def test_parse_notice_detail_start_price_from_start_price_characteristic():
     assert parse_notice_detail(payload)["start_price"] == 1500000.0
 
 
+def test_parse_notice_detail_prefers_purposezu_land_category_over_asset_category():
+    payload = {
+        "lots": [
+            {
+                "category": {"code": "307", "name": "Земельные участки (не образованы)"},
+                "characteristics": [
+                    {
+                        "code": "PurposeZU",
+                        "name": "Назначение земельного участка",
+                        "characteristicValue": {
+                            "code": "landsSettlements",
+                            "name": "Земли населенных пунктов",
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert parse_notice_detail(payload)["land_category"] == "Земли населенных пунктов"
+
+
 def test_parse_notice_detail_picks_cadastral_via_characteristic_only():
     payload = {
         "lots": [

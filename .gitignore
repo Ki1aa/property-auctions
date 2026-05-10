@@ -12,6 +12,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv*/
+backend/.venv*/
 venv/
 env/
 
@@ -19,7 +21,10 @@ env/
 backend/.pytest_cache/
 backend/*.log
 data/*.db
+data/backups/
 data/raw/
+data/logs/
+data/tmp/
 
 # Node / frontend
 frontend/node_modules/

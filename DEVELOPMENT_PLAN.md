@@ -1,21 +1,23 @@
 # План развития ГИС Торги Monitor
 
-Дата ревизии: 2026-05-09.
+Дата ревизии: 2026-05-10.
 
 Цель плана - довести MVP от рабочего мониторинга ГИС Торги до инструмента, который уверенно находит ИЖС-лоты, показывает качество данных, считает первичную привлекательность и отправляет только полезные алерты.
 
-## MVP: время, ссылки, Telegram, внешний контекст
+## MVP: Telegram-first продуктовый контракт
 
-**Цель:** в списке и карточке лота видны дата/время ключевых этапов и ссылки на монитор, ГИС Торги (страница извещения при известном `regNum`, иначе JSON), ПКК по кадастру, опционально поиск на Домклик/Авито; в Telegram при `new_lot` / `changed_lot` то же плюс baseline.
+**Цель:** рабочий Telegram-first монитор, который при появлении или изменении участка быстро показывает полезную карточку: конкретный внутренний лот из извещения, кадастр, площадь, ВРИ, цену за сотку, baseline/дисконт, ссылки на монитор, ГИС Торги, НСПД-карту и поиски на рыночных площадках.
+
+Актуальный контракт вынесен в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md). Ключевое ограничение: публичная ссылка ГИС Торги открывает извещение целиком, а не отдельный элемент `notice.lots[]`; поэтому наш монитор является канонической карточкой конкретного участка (`regNum + lotNumber`).
 
 **Выполнено 2026-05-09:**
-- Backend: [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — генерация URL; настройки `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS`, шаблоны `DOMCLICK_SEARCH_TEMPLATE`, `AVITO_LAND_SEARCH_TEMPLATE`, `CIAN_LAND_SEARCH_TEMPLATE` в [backend/app/config.py](backend/app/config.py); поля `app_lot_url`, `torgi_url`, `torgi_json_url` (второй href при отличии от HTML-карточки), `pkk_map_url`, пары ссылок Домклик/Авито/Циан — расширенный поиск и только кадастр (`*_cadastral`) в ответах `/api/lots` и `/api/lots/{id}`.
-- Telegram: HTML-сообщения с экранированием, две ссылки ГИС Торги при необходимости, маркетплейки с подписями; устойчивость: обрезка до `TELEGRAM_MAX_MESSAGE_LENGTH`, retry при 429, `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW` ([backend/app/services/alerts/service.py](backend/app/services/alerts/service.py), [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py)); smoke: `python scripts/send_telegram_test.py`.
+- Backend: [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — генерация URL; настройки `APP_PUBLIC_BASE_URL`, `INCLUDE_MARKETPLACE_SEARCH_URLS`, шаблоны `DOMCLICK_SEARCH_TEMPLATE`, `AVITO_LAND_SEARCH_TEMPLATE`, `CIAN_LAND_SEARCH_TEMPLATE` в [backend/app/config.py](backend/app/config.py); поля `app_lot_url`, `torgi_url`, `torgi_json_url` (второй href при отличии от HTML-карточки), `nspd_map_url` (deep link через `selectedCard`, если есть NSPD card id/type и центроид; иначе карта с query/координатами), legacy-null `pkk_map_url`, пары ссылок Домклик/Авито/Циан — расширенный поиск и только кадастр (`*_cadastral`) в ответах `/api/lots` и `/api/lots/{id}`.
+- Telegram: HTML-сообщения с экранированием, две ссылки ГИС Торги при необходимости, НСПД-карта при наличии кадастра, маркетплейки с подписями; устойчивость: обрезка до `TELEGRAM_MAX_MESSAGE_LENGTH`, retry при 429, `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW`, `TELEGRAM_PROXY_URL` для HTTP(S)-прокси к Bot API ([backend/app/services/alerts/service.py](backend/app/services/alerts/service.py), [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py)); smoke: `python scripts/send_telegram_test.py`.
 - Frontend: таблица `/lots` — даты со временем, колонка ссылок; карточка — блок «Ссылки» ([frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx)).
 
 **Разведка URL агрегаторов (шаблонный поиск «по кадастру», без API карточки):** проверять с российского IP после смены вёрстки площадок. Текущие шаблоны в коде: Домклик — `domclick.ru/search?query={q}`; Авито — каталог `zemelnye_uchastki` с `q={q}`; Циан — `kupit-uchastok` с `text={q}`. Точность — как у текстового поиска площадки; при смене query-параметра достаточно поправить `.env` без релиза.
 
-**Ограничение:** ссылки Домклик/Авито/Циан — шаблонный поиск по кадастру и/или адресу/региону, не гарантированная «карта цен по участку». Точная интеграция — после официальных API/скрейпинга по согласованию и/или НСПД.
+**Ограничение:** ссылки Домклик/Авито/Циан — шаблонный поиск по кадастру и/или адресу/региону, не гарантированная «карта цен по участку». НСПД-ссылка ведёт на публичную карту, но стабильный deep link прямо в участок не считаем частью контракта. Точная интеграция — после официальных API/скрейпинга по согласованию и/или НСПД.
 
 ## 0. Делегирование ИИ с прямым доступом к РФ-ресурсам
 
@@ -169,6 +171,9 @@
 - [backend/app/services/nspd/enrich.py](backend/app/services/nspd/enrich.py): поля `properties.options` (площадь, адрес, стоимость), центроид полигона EPSG:3857; после upsert лота в [ingest/service.py](backend/app/services/ingest/service.py) при наличии кадастра (лимит `NSPD_MAX_PER_RUN`, кеш `NSPD_REFRESH_AFTER_DAYS`).
 - Колонки `lots.nspd_*`, Alembic `20260509_09_add_lot_nspd_fields.py`; карточка лота в UI — блок «НСПД».
 - Настройки в [backend/app/config.py](backend/app/config.py) и [.env.example](.env.example).
+- Политика слияния НСПД в `Lot.area_sqm` / `Lot.address`: `NSPD_MERGE_AREA_POLICY`, `NSPD_MERGE_ADDRESS_POLICY` (`notice_only` по умолчанию).
+- Ручной догон существующих лотов: `python scripts/enrich_lots_nspd.py --region 72 --limit 50 --force`, отчёт `data/raw/nspd_enrich_report.json`.
+- Dev-флаг `NSPD_VERIFY_TLS=false` для локальной split-tunnel среды, где `nspd.gov.ru` отдаёт self-signed chain; production default остаётся `true`.
 
 **Задачи:**
 - Исследовать доступные endpoints НСПД и ограничения запросов.
@@ -213,9 +218,13 @@
 
 Срок: 2-4 недели, зависит от доступности источников и правил использования.
 
+**Каркас 2026-05-09:**
+- Таблица ORM `MarketComparable` ([backend/app/models.py](backend/app/models.py)), Alembic `20260509_10_add_market_comparables.py`; ingest пока не пишет строки.
+- Заглушка [backend/app/services/market/cian.py](backend/app/services/market/cian.py) до разведки задачи E (§0).
+
 **Задачи:**
 - Начать с одного источника, предпочтительно Циан.
-- Добавить модель `MarketComparable`:
+- Доработать модель `MarketComparable` при необходимости:
   - источник;
   - URL;
   - цена;
@@ -247,9 +256,8 @@
   - risk penalty за неполные данные, подозрительные ВРИ, отсутствие кадастра.
 - Добавить фильтр и сортировку по `investment_score`.
 - Перевести Telegram на smart-алерты:
-  - отправлять только `is_izhs_candidate=true`;
-  - учитывать `score >= threshold`;
-  - показывать причину попадания в алерт.
+  - частично сделано 2026-05-09/10: `TELEGRAM_ALERT_SKIP_LOW_SIGNAL`, `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE`, `TELEGRAM_ALERT_REQUIRE_BASELINE_FOR_DISCOUNT`, `TELEGRAM_ALERT_REQUIRE_CADASTRAL`, `TELEGRAM_ALERT_ONLY_IZHS`, `TELEGRAM_ALERTS_ENABLED`, компактная Telegram-карточка с сигналами;
+  - далее: отправлять только при `score >= threshold` и явная причина попадания в алерт.
 
 **Критерий готовности:**
 - Telegram перестает быть шумным журналом изменений и становится каналом реально интересных лотов.

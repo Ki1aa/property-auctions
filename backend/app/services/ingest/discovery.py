@@ -191,7 +191,9 @@ async def _discover_from_registry(client: httpx.AsyncClient) -> list[DiscoveredD
     return [_parse_dataset_file_url(url, "registry") for url in sorted(links)]
 
 
-def _extract_dataset_url_from_card(html: str, card_url: str) -> list[DiscoveredDatasetFile]:
+def _extract_dataset_url_from_card(
+    html: str, card_url: str, source_kind: str = "card"
+) -> list[DiscoveredDatasetFile]:
     links: list[str] = []
 
     preferred_match = _OPEN_DATA_FIELD_RE.search(html)
@@ -207,16 +209,24 @@ def _extract_dataset_url_from_card(html: str, card_url: str) -> list[DiscoveredD
     unique = list(dict.fromkeys(filtered))
     if not unique:
         raise RuntimeError("Dataset card parsed, but no valid data-*.json links were found")
-    return [_parse_dataset_file_url(url, "card") for url in unique]
+    return [_parse_dataset_file_url(url, source_kind) for url in unique]
+
+
+async def _discover_from_card_url(
+    client: httpx.AsyncClient, card_url: str, source_kind: str = "card"
+) -> list[DiscoveredDatasetFile]:
+    response = await _request_with_retries(client, card_url, settings.ingest_retry_count)
+    return _extract_dataset_url_from_card(response.text, card_url, source_kind)
 
 
 async def _discover_from_card(client: httpx.AsyncClient) -> list[DiscoveredDatasetFile]:
-    response = await _request_with_retries(client, settings.torgi_opendata_card_url, settings.ingest_retry_count)
-    return _extract_dataset_url_from_card(response.text, settings.torgi_opendata_card_url)
+    return await _discover_from_card_url(client, settings.torgi_opendata_card_url)
 
 
 def _from_direct_override() -> list[DiscoveredDatasetFile]:
     if not settings.ingest_source_url:
+        return []
+    if not _DATA_FILE_RE.search(settings.ingest_source_url):
         return []
     file_ref = _parse_dataset_file_url(settings.ingest_source_url, "direct")
     if settings.ingest_structure_url:
@@ -305,20 +315,25 @@ async def build_discovery_plan(
     if mode == "backfill":
         _planned_dates(last_processed_to, mode)
 
-    direct = _from_direct_override()
-    if direct:
-        files = _plan_files_with_watermark(direct, mode, last_processed_to)
-        return DiscoveryPlan(files=files, source_kind="direct", dataset_id=settings.torgi_opendata_dataset_id)
-
     timeout = settings.ingest_timeout_seconds
     async with httpx.AsyncClient(timeout=timeout) as client:
-        try:
-            discovered = await _discover_from_registry(client)
-            source_kind = "registry"
-        except Exception as registry_exc:  # noqa: BLE001
-            logger.warning("Registry discovery failed, trying card fallback: %s", registry_exc)
-            discovered = await _discover_from_card(client)
-            source_kind = "card"
+        direct = _from_direct_override()
+        if direct:
+            files = _plan_files_with_watermark(direct, mode, last_processed_to)
+            return DiscoveryPlan(files=files, source_kind="direct", dataset_id=settings.torgi_opendata_dataset_id)
+
+        override_url = (settings.ingest_source_url or "").strip()
+        if override_url:
+            discovered = await _discover_from_card_url(client, override_url, source_kind="card_override")
+            source_kind = "card_override"
+        else:
+            try:
+                discovered = await _discover_from_registry(client)
+                source_kind = "registry"
+            except Exception as registry_exc:  # noqa: BLE001
+                logger.warning("Registry discovery failed, trying card fallback: %s", registry_exc)
+                discovered = await _discover_from_card(client)
+                source_kind = "card"
 
     files = _plan_files_with_watermark(discovered, mode, last_processed_to)
     return DiscoveryPlan(files=files, source_kind=source_kind, dataset_id=settings.torgi_opendata_dataset_id)

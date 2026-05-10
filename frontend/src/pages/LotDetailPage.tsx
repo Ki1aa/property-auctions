@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import { fetchLot } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
 import { LotDetail, MapPoint } from "../types";
-import { pkkMapUrl } from "../utils/links";
 
 const TradesMap = lazy(() =>
   import("../components/TradesMap").then((module) => ({ default: module.TradesMap }))
@@ -103,8 +102,14 @@ export function LotDetailPage() {
   const hasLandSection =
     lot.cadastral_number || lot.area_sqm !== null || lot.land_category || lot.permitted_use || lot.address;
 
-  const pkkHref = lot.pkk_map_url ?? pkkMapUrl(lot.cadastral_number);
   const jsonNoticeHref = lot.torgi_json_url || lot.notice_detail_url || lot.source_url;
+  const noticeLotLabel =
+    lot.notice_lot_number && lot.notice_lot_count
+      ? `лот ${lot.notice_lot_number} из ${lot.notice_lot_count}`
+      : lot.notice_lot_number
+        ? `лот ${lot.notice_lot_number}`
+        : "лот из извещения";
+  const discountIsPositive = lot.discount_to_baseline !== null && lot.discount_to_baseline > 0;
 
   return (
     <div className="page">
@@ -117,30 +122,45 @@ export function LotDetailPage() {
           <StatusBadge status={lot.status} />
         </div>
       </div>
-      <p className="page__subtitle">ID источника: {lot.source_id}</p>
+      <p className="page__subtitle">
+        ID источника: {lot.source_id}
+        {lot.notice_reg_num ? ` · извещение ${lot.notice_reg_num}` : ""}
+        {lot.notice_lot_number ? ` · ${noticeLotLabel}` : ""}
+      </p>
+
+      <section className="lot-summary">
+        <div className="lot-summary__item">
+          <span>Кадастр</span>
+          <strong className="cell--mono">{lot.cadastral_number || "—"}</strong>
+        </div>
+        <div className="lot-summary__item">
+          <span>Площадь</span>
+          <strong>{formatArea(lot.area_sqm)}</strong>
+        </div>
+        <div className="lot-summary__item">
+          <span>Стартовая цена</span>
+          <strong>{formatPrice(lot.start_price)}</strong>
+        </div>
+        <div className="lot-summary__item">
+          <span>₽/сотка</span>
+          <strong>{formatPrice(lot.start_price_per_sotka)}</strong>
+        </div>
+        <div className="lot-summary__item">
+          <span>Дисконт к baseline</span>
+          <strong className={discountIsPositive ? "cell--good" : ""}>{formatPercent(lot.discount_to_baseline)}</strong>
+        </div>
+        <div className="lot-summary__item">
+          <span>Приём заявок до</span>
+          <strong>{formatDate(lot.end_date)}</strong>
+        </div>
+      </section>
 
       <section className="section">
-        <h2>Ссылки</h2>
+        <h2>Проверка источника</h2>
         <div className="card">
-          <div className="card__row">
-            <span className="card__label">В приложении</span>
-            <span>
-              <Link to={`/lots/${lot.id}`}>Карточка в мониторе</Link>
-            </span>
-          </div>
-          {lot.app_lot_url ? (
-            <div className="card__row">
-              <span className="card__label">Публичный URL</span>
-              <span>
-                <a href={lot.app_lot_url} target="_blank" rel="noreferrer">
-                  {lot.app_lot_url}
-                </a>
-              </span>
-            </div>
-          ) : null}
           {lot.torgi_url ? (
             <div className="card__row">
-              <span className="card__label">ГИС Торги</span>
+              <span className="card__label">Извещение ГИС Торги</span>
               <span>
                 <a href={lot.torgi_url} target="_blank" rel="noreferrer">
                   Открыть извещение
@@ -167,12 +187,32 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
-          {pkkHref ? (
+          <p className="card__note">
+            В ГИС Торгах публичная ссылка открывает извещение целиком. В нашем мониторе эта карточка соответствует конкретному внутреннему лоту:
+            {lot.notice_reg_num ? ` извещение ${lot.notice_reg_num}` : " извещение не определено"}
+            {lot.notice_lot_number ? `, ${noticeLotLabel}` : ""}.
+          </p>
+          {lot.nspd_map_url ? (
             <div className="card__row">
-              <span className="card__label">ПКК Росреестра</span>
+              <span className="card__label">НСПД карта</span>
               <span>
-                <a href={pkkHref} target="_blank" rel="noreferrer">
-                  Публичная кадастровая карта
+                <a href={lot.nspd_map_url} target="_blank" rel="noreferrer">
+                  Открыть публичную кадастровую карту
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.nspd_map_url ? (
+            <p className="card__footnote">
+              Если НСПД не откроет участок автоматически, вставьте кадастровый номер {lot.cadastral_number || "из карточки"} в поиск карты.
+            </p>
+          ) : null}
+          {lot.domclick_map_url ? (
+            <div className="card__row">
+              <span className="card__label">Домклик карта</span>
+              <span>
+                <a href={lot.domclick_map_url} target="_blank" rel="noreferrer">
+                  Смотреть цены рядом
                 </a>
               </span>
             </div>
@@ -237,15 +277,16 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
-          {(lot.domclick_search_url ||
+          {(lot.domclick_map_url ||
+            lot.domclick_search_url ||
             lot.domclick_search_url_cadastral ||
             lot.avito_search_url ||
             lot.avito_search_url_cadastral ||
             lot.cian_search_url ||
             lot.cian_search_url_cadastral) && (
             <p className="card__footnote">
-              Ссылки на Домклик, Авито и Циан ведут в общий текстовый поиск (кадастр и/или адрес); это не официальная
-              карточка участка и не оценка рынка.
+              Ссылки на Домклик, Авито и Циан ведут в общий поиск или карту района; это не официальная карточка участка
+              и не оценка рынка.
             </p>
           )}
         </div>
@@ -309,11 +350,7 @@ export function LotDetailPage() {
             <div className="card__row">
               <span className="card__label">Кадастровый номер</span>
               <span className="cell--mono">
-                {lot.cadastral_number && pkkHref ? (
-                  <a href={pkkHref} target="_blank" rel="noreferrer">{lot.cadastral_number}</a>
-                ) : (
-                  lot.cadastral_number || "—"
-                )}
+                {lot.cadastral_number || "—"}
               </span>
             </div>
             <div className="card__row"><span className="card__label">Площадь</span><span>{formatArea(lot.area_sqm)}</span></div>
@@ -322,12 +359,6 @@ export function LotDetailPage() {
             <div className="card__row"><span className="card__label">Коды ВРИ</span><span>{lot.permitted_use_codes || "—"}</span></div>
             <div className="card__row"><span className="card__label">ИЖС-кандидат</span><span>{izhsReason(lot)}</span></div>
             <div className="card__row"><span className="card__label">Адрес</span><span>{lot.address || "—"}</span></div>
-            {pkkHref ? (
-              <div className="card__row">
-                <span className="card__label">Публичная кадастровая карта</span>
-                <span><a href={pkkHref} target="_blank" rel="noreferrer">Открыть на ПКК Росреестра</a></span>
-              </div>
-            ) : null}
           </div>
         </section>
       )}

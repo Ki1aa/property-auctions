@@ -15,7 +15,7 @@
   --error: #b00020;
   --error-soft: #fde2e6;
   --shadow: 0 2px 12px rgba(34, 53, 89, 0.06);
-  --radius: 12px;
+  --radius: 8px;
 }
 
 * {
@@ -753,6 +753,12 @@ tr:hover td {
   font-weight: 600;
 }
 
+.lots-table__open-link {
+  min-height: 32px;
+  padding: 6px 12px;
+  color: #fff;
+}
+
 .lots-table__lot-cell {
   min-width: 0;
 }
@@ -1062,6 +1068,37 @@ tr:hover td {
 }
 
 /* Card (lot detail) */
+.lot-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.lot-summary__item {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.lot-summary__item span {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lot-summary__item strong {
+  min-width: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1103,6 +1140,16 @@ tr:hover td {
   color: var(--text-muted);
   line-height: 1.4;
   border-top: 1px solid var(--border-soft);
+}
+
+.card__note {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 /* Misc */

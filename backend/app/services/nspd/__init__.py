@@ -6,6 +6,7 @@ from app.services.nspd.enrich import (
     enrich_lot_from_nspd_sync,
     extract_nspd_options_from_feature,
     maybe_enrich_lot_nspd_async,
+    merge_nspd_into_notice_fields,
     nspd_cache_is_fresh,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "extract_feature_collection_items",
     "extract_nspd_options_from_feature",
     "maybe_enrich_lot_nspd_async",
+    "merge_nspd_into_notice_fields",
     "nspd_cache_is_fresh",
     "parse_geoportal_response",
 ]

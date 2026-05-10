@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import IngestRun, Lot, OpenDataNotice, Organizer
+from app.models import IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
 from app import scheduler as ingest_scheduler
 from app.config import settings
 from app.services.external_lot_links import (
@@ -17,8 +17,10 @@ from app.services.external_lot_links import (
     avito_search_url_cadastral_only,
     cian_land_search_url,
     cian_land_search_url_cadastral_only,
+    domclick_land_map_url,
     domclick_land_search_url,
     domclick_land_search_url_cadastral_only,
+    nspd_lot_map_url,
     pkk_map_url,
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
@@ -80,9 +82,48 @@ def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
-def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListItem:
+def _notice_identity(lot: Lot, latest_payload: dict[str, Any] | None = None) -> tuple[str | None, str | None, int | None]:
+    source_id = (lot.source_id or "").strip()
+    notice_reg_num: str | None = None
+    lot_number: str | None = None
+    lot_count: int | None = None
+
+    if ":lot:" in source_id:
+        notice_reg_num, lot_number = source_id.split(":lot:", 1)
+    elif source_id.isdigit():
+        notice_reg_num = source_id
+
+    if latest_payload:
+        raw_count = latest_payload.get("_notice_lot_count")
+        if isinstance(raw_count, int) and raw_count > 0:
+            lot_count = raw_count
+        elif isinstance(raw_count, str) and raw_count.isdigit():
+            lot_count = int(raw_count)
+
+        raw_lot = latest_payload.get("_notice_lot")
+        if isinstance(raw_lot, dict):
+            raw_number = raw_lot.get("lotNumber")
+            if raw_number is not None and str(raw_number).strip():
+                lot_number = str(raw_number).strip()
+
+        raw_index = latest_payload.get("_notice_lot_index")
+        if lot_number is None and isinstance(raw_index, int):
+            lot_number = str(raw_index + 1)
+
+    if lot_count and lot_count > 1 and lot_number is None:
+        lot_number = "1"
+
+    return notice_reg_num, lot_number, lot_count
+
+
+def _lot_list_item(
+    lot: Lot,
+    valuation: LotValuation | None = None,
+    latest_payload: dict[str, Any] | None = None,
+) -> LotListItem:
     ps, pm = derived_prices(lot.start_price, lot.area_sqm)
     valuation = valuation or LotValuation()
+    notice_reg_num, notice_lot_number, notice_lot_count = _notice_identity(lot, latest_payload)
     return LotListItem(
         id=lot.id,
         source_id=lot.source_id,
@@ -102,6 +143,9 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         municipality=lot.municipality,
         settlement=lot.settlement,
         is_izhs_candidate=bool(lot.is_izhs_candidate),
+        notice_reg_num=notice_reg_num,
+        notice_lot_number=notice_lot_number,
+        notice_lot_count=notice_lot_count,
         start_price_per_sotka=ps,
         start_price_per_sqm=pm,
         baseline_price_per_sotka=valuation.baseline_price_per_sotka,
@@ -113,7 +157,9 @@ def _lot_list_item(lot: Lot, valuation: LotValuation | None = None) -> LotListIt
         app_lot_url=app_public_lot_url(lot.id),
         torgi_url=torgi_public_url(lot, None),
         torgi_json_url=torgi_notice_json_link_when_distinct(lot, None),
+        nspd_map_url=nspd_lot_map_url(lot),
         pkk_map_url=pkk_map_url(lot.cadastral_number),
+        domclick_map_url=domclick_land_map_url(lot),
         domclick_search_url=domclick_land_search_url(lot),
         domclick_search_url_cadastral=domclick_land_search_url_cadastral_only(lot),
         avito_search_url=avito_search_url(lot),
@@ -162,9 +208,9 @@ def _lot_filters(
     elif has_cadastral is False:
         filters.append((Lot.cadastral_number.is_(None)) | (Lot.cadastral_number == ""))
     if has_price_per_sotka is True:
-        filters.append(and_(Lot.start_price.is_not(None), Lot.area_sqm.is_not(None), Lot.area_sqm > 0))
+        filters.append(and_(Lot.start_price.is_not(None), Lot.start_price > 0, Lot.area_sqm.is_not(None), Lot.area_sqm > 0))
     elif has_price_per_sotka is False:
-        filters.append((Lot.start_price.is_(None)) | (Lot.area_sqm.is_(None)) | (Lot.area_sqm <= 0))
+        filters.append((Lot.start_price.is_(None)) | (Lot.start_price <= 0) | (Lot.area_sqm.is_(None)) | (Lot.area_sqm <= 0))
     return filters
 
 
@@ -178,7 +224,7 @@ def _lots_count(db: Session, filters: list) -> int:
 def _lots_select_ordered(sort: LotsSort):
     price_per_sotka_expr = case(
         (
-            and_(Lot.area_sqm.is_not(None), Lot.area_sqm > 0, Lot.start_price.is_not(None)),
+            and_(Lot.area_sqm.is_not(None), Lot.area_sqm > 0, Lot.start_price.is_not(None), Lot.start_price > 0),
             Lot.start_price / (Lot.area_sqm / 100.0),
         ),
         else_=None,
@@ -465,7 +511,7 @@ def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)
         with_cadastral=count_where(and_(Lot.cadastral_number.is_not(None), Lot.cadastral_number != "")),
         with_area=count_where(and_(Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
         with_start_price=count_where(Lot.start_price.is_not(None)),
-        with_price_per_sotka=count_where(and_(Lot.start_price.is_not(None), Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
+        with_price_per_sotka=count_where(and_(Lot.start_price.is_not(None), Lot.start_price > 0, Lot.area_sqm.is_not(None), Lot.area_sqm > 0)),
         with_baseline=sum(1 for valuation in valuations if valuation.baseline_price_per_sotka is not None),
         with_positive_discount=sum(
             1 for valuation in valuations if lot_has_positive_discount(valuation)
@@ -491,7 +537,11 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
             notice_payload = notice.payload
 
     valuation = lot_valuation(lot, load_baseline_index(db))
-    list_base = _lot_list_item(lot, valuation)
+    latest_snapshot = db.scalar(
+        select(LotSnapshot).where(LotSnapshot.lot_id == lot.id).order_by(desc(LotSnapshot.id))
+    )
+    latest_payload = latest_snapshot.payload if latest_snapshot is not None and isinstance(latest_snapshot.payload, dict) else None
+    list_base = _lot_list_item(lot, valuation, latest_payload)
     list_fields = list_base.model_dump()
     list_fields["torgi_url"] = torgi_public_url(lot, notice_payload)
     list_fields["torgi_json_url"] = torgi_notice_json_link_when_distinct(lot, notice_payload)
@@ -513,6 +563,8 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         nspd_cost_value=lot.nspd_cost_value,
         nspd_centroid_latitude=lot.nspd_centroid_latitude,
         nspd_centroid_longitude=lot.nspd_centroid_longitude,
+        nspd_card_id=lot.nspd_card_id,
+        nspd_card_type=lot.nspd_card_type,
         nspd_enriched_at=lot.nspd_enriched_at,
     )
 

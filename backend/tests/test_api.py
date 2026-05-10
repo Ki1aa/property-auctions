@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import IngestRun, Lot, OpenDataNotice, Organizer
+from app.models import IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
 
 
 def _setup_inmemory_app():
@@ -230,6 +230,52 @@ def test_lots_return_baseline_valuation_and_discount_sort():
     assert quality["with_positive_discount"] == 1
 
 
+def test_zero_start_price_does_not_create_fake_discount():
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add_all(
+        [
+            Lot(
+                source_id="lot-zero-price",
+                title="Нулевая цена",
+                status="active",
+                region="72",
+                category="ZK",
+                area_sqm=1000.0,
+                start_price=0,
+                is_izhs_candidate=True,
+            ),
+            Lot(
+                source_id="lot-priced",
+                title="С ценой",
+                status="active",
+                region="72",
+                category="ZK",
+                area_sqm=1000.0,
+                start_price=1_000_000,
+                is_izhs_candidate=True,
+            ),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    body = client.get("/api/lots", params={"cadastral_number": "", "sort": "updated_at_desc"}).json()
+    zero = next(item for item in body["items"] if item["source_id"] == "lot-zero-price")
+    assert zero["start_price_per_sotka"] is None
+    assert zero["discount_to_baseline"] is None
+
+    with_price = client.get("/api/lots", params={"has_price_per_sotka": "true"}).json()["items"]
+    assert {item["source_id"] for item in with_price} == {"lot-priced"}
+
+    quality = client.get("/api/lots/quality", params={"region": "72"}).json()
+    assert quality["with_start_price"] == 2
+    assert quality["with_price_per_sotka"] == 1
+    assert quality["with_positive_discount"] == 0
+
+
 def test_query_limits_reject_non_positive_values():
     _setup_inmemory_app()
     client = TestClient(app)
@@ -434,33 +480,50 @@ def test_opendata_notices_multi_filter_and_facets():
     assert invalid_sort.status_code == 422
 
 
-def test_lot_detail_returns_notice_payload_when_linked():
+def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     from sqlalchemy import select
 
+    monkeypatch.setattr("app.services.external_lot_links.settings.include_marketplace_search_urls", False)
     TestingSessionLocal = _setup_inmemory_app()
 
     db = TestingSessionLocal()
     notice = OpenDataNotice(
         reg_num="72000000000000000123",
         document_type="notice",
-        href="https://example.com/docs/notice_72000000000000000123_abc.json",
-        payload={"regNum": "72000000000000000123", "biddTypeCode": "ZK", "extra": "raw"},
+        href="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        payload={
+            "regNum": "72000000000000000123",
+            "href": "https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+            "biddTypeCode": "ZK",
+            "extra": "raw",
+        },
     )
     db.add(notice)
     db.flush()
     notice_id = notice.id
+    lot = Lot(
+        source_id="72000000000000000123:lot:2",
+        title="Лот с привязкой",
+        status="active",
+        region="72",
+        cadastral_number="72:01:0000000:1",
+        municipality="Тюмень",
+        address="ул. Примерная, 1",
+        opendata_notice_id=notice_id,
+        source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        notice_detail_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+    )
+    db.add(lot)
+    db.flush()
     db.add(
-        Lot(
-            source_id="lot-with-notice",
-            title="Лот с привязкой",
-            status="active",
-            region="72",
-            cadastral_number="72:01:0000000:1",
-            municipality="Тюмень",
-            address="ул. Примерная, 1",
-            opendata_notice_id=notice_id,
-            source_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
-            notice_detail_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
+        LotSnapshot(
+            lot_id=lot.id,
+            payload_hash="abc",
+            payload={
+                "_notice_lot_index": 1,
+                "_notice_lot_count": 3,
+                "_notice_lot": {"lotNumber": "2"},
+            },
         )
     )
     db.commit()
@@ -475,15 +538,25 @@ def test_lot_detail_returns_notice_payload_when_linked():
     assert body["notice_payload"] is not None
     assert body["notice_payload"]["regNum"] == "72000000000000000123"
     assert body["notice_payload"]["extra"] == "raw"
+    assert body["notice_reg_num"] == "72000000000000000123"
+    assert body["notice_lot_number"] == "2"
+    assert body["notice_lot_count"] == 3
     assert body["torgi_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
-    assert body["torgi_json_url"] == "https://torgi.gov.ru/new/api/public/lot/notice.json"
-    assert body["pkk_map_url"] is not None and "pkk.rosreestr.ru" in body["pkk_map_url"]
-    assert body["domclick_search_url"] is not None and "domclick.ru" in body["domclick_search_url"]
-    assert body["domclick_search_url_cadastral"] is not None and "domclick.ru" in body["domclick_search_url_cadastral"]
-    assert body["avito_search_url"] is not None and "avito.ru" in body["avito_search_url"]
-    assert body["avito_search_url_cadastral"] is not None and "avito.ru" in body["avito_search_url_cadastral"]
-    assert body["cian_search_url"] is not None and "cian.ru" in body["cian_search_url"]
-    assert body["cian_search_url_cadastral"] is not None and "cian.ru" in body["cian_search_url_cadastral"]
+    assert body["torgi_json_url"] == (
+        "https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json"
+    )
+    assert body["nspd_map_url"] == (
+        "https://nspd.gov.ru/map?thematic=PKK&theme_id=1&baseLayerId=235&"
+        "is_copy_url=true&query=72:01:0000000:1"
+    )
+    assert body["pkk_map_url"] is None
+    assert body["domclick_map_url"] is None
+    assert body["domclick_search_url"] is None
+    assert body["domclick_search_url_cadastral"] is None
+    assert body["avito_search_url"] is None
+    assert body["avito_search_url_cadastral"] is None
+    assert body["cian_search_url"] is None
+    assert body["cian_search_url_cadastral"] is None
 
 
 def test_lot_detail_returns_null_notice_payload_when_not_linked():

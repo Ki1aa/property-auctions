@@ -2,7 +2,7 @@
 
 > Контекст для AI-агентов: [AGENTS.md](AGENTS.md) - постоянный контекст и соглашения, [WORKLOG.md](WORKLOG.md) - журнал работ.
 
-Система загружает данные ГИС Торги, сохраняет данные в локальную БД SQLite (на этапе разработки), предоставляет API, отображает список извещений и поддерживает оповещения.
+Система загружает данные ГИС Торги, сохраняет данные в локальную БД SQLite (на этапе разработки), предоставляет API, отображает список лотов и поддерживает Telegram-оповещения. Продуктовый контракт MVP описан в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
 
 ## Текущий режим разработки
 
@@ -61,11 +61,11 @@ python scripts/load_demo_tyumen_data.py --reset
 
 ## Discovery chain ingestion
 
-Ingestion использует 3 уровня discovery источника:
+Ingestion использует устойчивую цепочку discovery источника:
 
-1. **Primary:** `TORGI_OPENDATA_REGISTRY_URL` (машиночитаемый реестр `list.json`).
+1. **Primary:** `TORGI_OPENDATA_REGISTRY_URL` (машиночитаемый реестр `list.json`) и `meta.json` набора.
 2. **Fallback:** `TORGI_OPENDATA_CARD_URL` (HTML-карточка набора).
-3. **Fallback-2:** прямые `INGEST_SOURCE_URL` + `INGEST_STRUCTURE_URL`.
+3. **Override:** `INGEST_SOURCE_URL` как URL карточки OpenData или прямой `data-*.json`; `INGEST_STRUCTURE_URL` нужен только для прямого JSON без выводимой `structure-*`.
 
 Поддерживаются режимы:
 
@@ -73,6 +73,8 @@ Ingestion использует 3 уровня discovery источника:
 - `INGEST_MODE=backfill` - загрузка диапазона по `BACKFILL_FROM` / `BACKFILL_TO`.
 
 Каждый `data-*.json` обрабатывается только с соответствующей `structure-*.json`. Если версия структуры не поддерживается, файл сохраняется в raw и маркируется как `schema_migration_required` в `ingest_manifest`.
+
+В MVP по умолчанию включён продуктовый фильтр `INGEST_ONLY_LAND_LOTS=true`: в `lots` сохраняются только земельные участки / права на земельные участки. Автомобили, древесина, помещения и другие имущественные лоты отсекаются после detail-fetch по виду торгов `ZK`, признакам земли в title/category/ВРИ/адресе и ИЖС-маркерам. Для исследовательской загрузки всего реестра флаг можно временно выключить.
 
 ## Backfill запуск
 
@@ -114,7 +116,7 @@ alembic current
 ## Основные эндпоинты
 
 - `GET /health` - проверка доступности.
-- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка).
+- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка), `nspd_map_url` при наличии кадастра. Если НСПД-обогащение нашло `card_id/card_type` и центроид, URL ведёт прямо в карточку участка через `selectedCard`; иначе открывает карту с кадастром в query и, при наличии центроида, с нужным zoom/координатами. `domclick_map_url` появляется при наличии координат/НСПД-центроида и ведёт на карту Домклик вокруг участка (`offer_type=lot`, bbox `sw/ne`, радиус `MARKETPLACE_MAP_RADIUS_KM`).
 - `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами, `sort` и baseline-колонками, параметр `max_rows` (по умолчанию 10000, макс. 50000).
 - `GET /api/lots/quality?region=72` - метрики качества данных для Dashboard: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline.
 - `GET /api/lots/{id}` - карточка лота.
@@ -126,7 +128,7 @@ alembic current
 
 ## Telegram-алерты
 
-После ingest при событиях `new_lot` / `changed_lot` backend может отправить сообщение в Telegram (HTML, ссылки на монитор, ГИС Торги, ПКК, опционально поиск на Домклик/Авито/Циан).
+После ingest при событиях `new_lot` / `changed_lot` backend может отправить компактную карточку в Telegram: вердикт, причина попадания, `regNum + lotNumber`, кадастр, земля, цена за сотку, baseline и ссылки на монитор, публичную карточку ГИС Торги `/new/public/notices/view/{regNum}`, НСПД-карту/deep link, карту Домклик вокруг участка при наличии координат и сырой JSON извещения. Текстовый поиск на Домклик/Авито/Циан опционален через `INCLUDE_MARKETPLACE_SEARCH_URLS=true`; в MVP он выключен по умолчанию, потому что площадки могут открывать капчу или пустую выдачу.
 
 1. Создайте бота в [@BotFather](https://t.me/BotFather), получите `TELEGRAM_BOT_TOKEN`.
 2. Узнайте `TELEGRAM_CHAT_ID`: для личного чата напишите боту `/start`, затем используйте [@userinfobot](https://t.me/userinfobot) или `getUpdates` у Bot API; для канала добавьте бота администратором, id обычно вида `-100...`.
@@ -134,7 +136,32 @@ alembic current
 4. Проверка без ingest: из каталога `backend` выполните `python scripts/send_telegram_test.py` (сообщение по умолчанию можно заменить флагом `--text`).
 5. Типичные ошибки Bot API: **403 Forbidden** — бот не может писать в чат (не нажали `/start` в личке, бот не админ в канале, неверный `chat_id`); **401** — неверный токен. Чтобы сократить шум, включите `TELEGRAM_ALERT_ONLY_IZHS=true` (только лоты-кандидаты ИЖС).
 
-Дополнительно: `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW`, лимит длины и повтор при 429 — в `.env.example`.
+Дополнительно: `TELEGRAM_DISABLE_WEB_PAGE_PREVIEW`, лимит длины, таймаут, повтор при 429 и `TELEGRAM_PROXY_URL` для HTTP(S)-прокси к Bot API — в `.env.example`.
+
+**Чеклист production (MVP push в Telegram):**
+
+- `RUN_INGEST_ON_STARTUP=false` — чтобы при каждом рестарте не стартовал тяжёлый ingest; полагайтесь на APScheduler и/или ручной `POST /api/ingest-runs/start`.
+- `TELEGRAM_ALERTS_ENABLED=true`, заданы `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`; при обслуживании БД без шума можно временно выставить `false`.
+- Если `send_telegram_test.py` падает на `ConnectTimeout` к `api.telegram.org`, задайте `TELEGRAM_PROXY_URL` или передайте разово `--proxy-url http://127.0.0.1:7890`, затем повторите smoke.
+- `APP_PUBLIC_BASE_URL` — публичный URL SPA для ссылки «Монитор» в алерте.
+- Хост с маршрутом к `torgi.gov.ru` (часто нужен IP в РФ); при необходимости `TARGET_REGION_CODES` для сужения объёма.
+- Опционально `NSPD_ENABLED=true` на той же машине, если доступен `nspd.gov.ru`; политики слияния `NSPD_MERGE_*` — в `.env.example`. Для локального split tunneling с self-signed TLS цепочкой можно временно ставить `NSPD_VERIFY_TLS=false`, после чего `domclick_map_url` начнёт появляться у лотов с найденным центроидом.
+- Умный поток: `TELEGRAM_ALERT_SKIP_LOW_SIGNAL`, `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE`, `TELEGRAM_ALERT_REQUIRE_BASELINE_FOR_DISCOUNT`, `TELEGRAM_ALERT_REQUIRE_CADASTRAL`, `TELEGRAM_ALERT_ONLY_IZHS` — комбинируйте по сценарию. `TELEGRAM_ALERT_SKIP_LOW_SIGNAL=true` убирает сообщения без практического сигнала: не ИЖС, нет кадастра, нет цены за сотку/baseline. Для самого тихого MVP-потока обычно включают ИЖС + кадастр + минимальный дисконт, а baseline-required включают только когда база уже достаточно наполнена.
+
+**Качество кадастра / парсера:** периодически прогоняйте `python scripts/verify_detail_parser_window.py` (см. [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), задача B) на машине с доступом к Торгам.
+
+## НСПД-обогащение существующих лотов
+
+Если в БД уже есть лоты с кадастровыми номерами, их можно отдельно проверить через НСПД, не дожидаясь нового ingest:
+
+```bash
+cd backend
+python scripts/enrich_lots_nspd.py --region 72 --limit 50 --force
+```
+
+`--force` нужен для ручного запуска, если в `.env` оставлено `NSPD_ENABLED=false`. Для безопасной проверки без записи в БД используйте `--dry-run`. Скрипт пишет отчёт в `data/raw/nspd_enrich_report.json`.
+
+Если при split tunneling НСПД открывается, но Python падает с `CERTIFICATE_VERIFY_FAILED` / self-signed chain, для локального dev можно временно задать `NSPD_VERIFY_TLS=false`. В production оставляйте `true`.
 
 ## Тесты
 

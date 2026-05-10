@@ -32,7 +32,7 @@ class LotValuation:
 
 def derived_prices(start_price: float | None, area_sqm: float | None) -> tuple[float | None, float | None]:
     """Rub per sotka (100 m²) and per m² from notice start_price and area; not market valuation."""
-    if start_price is None or area_sqm is None or area_sqm <= 0:
+    if start_price is None or start_price <= 0 or area_sqm is None or area_sqm <= 0:
         return None, None
     per_sqm = start_price / area_sqm
     per_sotka = start_price / (area_sqm / 100.0)
@@ -40,7 +40,7 @@ def derived_prices(start_price: float | None, area_sqm: float | None) -> tuple[f
 
 
 def price_per_sotka(start_price: float | None, area_sqm: float | None) -> float | None:
-    if start_price is None or area_sqm is None or area_sqm <= 0:
+    if start_price is None or start_price <= 0 or area_sqm is None or area_sqm <= 0:
         return None
     return start_price / (area_sqm / 100.0)
 
@@ -143,7 +143,14 @@ def _pick_baseline(lot: Lot, index: dict[str, dict[Any, BaselineStats] | Baselin
 def lot_valuation(lot: Lot, index: dict[str, dict[Any, BaselineStats] | BaselineStats | None]) -> LotValuation:
     current = price_per_sotka(lot.start_price, lot.area_sqm)
     if current is None:
-        return LotValuation(valuation_reason="Нет стартовой цены или площади для расчёта.")
+        if lot.start_price is None or lot.start_price <= 0:
+            if lot.area_sqm is None or lot.area_sqm <= 0:
+                reason = "Нет корректной стартовой цены и площади для расчёта."
+            else:
+                reason = "Нет корректной стартовой цены для расчёта."
+        else:
+            reason = "Нет площади для расчёта цены за сотку."
+        return LotValuation(valuation_reason=reason)
 
     baseline = _pick_baseline(lot, index)
     if baseline is None or baseline.price_per_sotka <= 0:

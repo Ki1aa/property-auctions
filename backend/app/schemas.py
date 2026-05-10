@@ -23,6 +23,9 @@ class LotListItem(BaseModel):
     municipality: str | None = None
     settlement: str | None = None
     is_izhs_candidate: bool = False
+    notice_reg_num: str | None = None
+    notice_lot_number: str | None = None
+    notice_lot_count: int | None = None
     # From notice: start_price / area; not market valuation. None if price or area missing.
     start_price_per_sotka: float | None = None
     start_price_per_sqm: float | None = None
@@ -33,11 +36,15 @@ class LotListItem(BaseModel):
     valuation_baseline_scope: str | None = None
     valuation_baseline_sample_size: int | None = None
     valuation_reason: str | None = None
-    # Deep links (see external_lot_links); marketplace URLs are best-effort search, not cadastral maps.
+    # Deep links (see external_lot_links); marketplace URLs are off by default and best-effort search.
     app_lot_url: str | None = None
     torgi_url: str | None = None
     torgi_json_url: str | None = None
+    # NSPD public map entry point; cadastral number is shown separately to paste/search there.
+    nspd_map_url: str | None = None
+    # Legacy field kept for API compatibility; currently null because old PKK deep links are unreliable.
     pkk_map_url: str | None = None
+    domclick_map_url: str | None = None
     domclick_search_url: str | None = None
     domclick_search_url_cadastral: str | None = None
     avito_search_url: str | None = None
@@ -70,6 +77,8 @@ class LotDetail(LotListItem):
     nspd_cost_value: float | None = None
     nspd_centroid_latitude: float | None = None
     nspd_centroid_longitude: float | None = None
+    nspd_card_id: str | None = None
+    nspd_card_type: str | None = None
     nspd_enriched_at: datetime | None = None
 
 

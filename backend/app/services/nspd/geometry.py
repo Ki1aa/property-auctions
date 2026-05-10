@@ -14,6 +14,16 @@ def epsg3857_to_4326(x: float, y: float) -> tuple[float, float]:
     return (lat, lon)
 
 
+def wgs84_to_epsg3857(latitude: float, longitude: float) -> tuple[float, float]:
+    """Convert WGS84 latitude/longitude to Web Mercator (EPSG:3857)."""
+    lat = max(min(float(latitude), 85.05112878), -85.05112878)
+    lon = float(longitude)
+    x = lon * 20037508.34 / 180.0
+    y = math.log(math.tan((90.0 + lat) * math.pi / 360.0)) / (math.pi / 180.0)
+    y = y * 20037508.34 / 180.0
+    return (x, y)
+
+
 def polygon_centroid_lat_lon(geometry: dict[str, Any]) -> tuple[float, float] | None:
     if not isinstance(geometry, dict) or geometry.get("type") != "Polygon":
         return None

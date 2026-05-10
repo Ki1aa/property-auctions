@@ -484,10 +484,17 @@ def parse_notice_detail(payload: Any) -> dict[str, Any]:
     if start_price is None:
         start_price = _find_first_number(payload, PRICE_FALLBACK_ALIASES)
 
+    land_category = _find_characteristic_string(
+        payload,
+        ("PurposeZU", "LandCategory", "landCategory", "categoryLand", "estateLandCategory"),
+    )
+    if land_category is None:
+        land_category = _find_first_string(payload, LAND_CATEGORY_ALIASES)
+
     return {
         "cadastral_number": cadastral,
         "area_sqm": area_sqm,
-        "land_category": _find_first_string(payload, LAND_CATEGORY_ALIASES),
+        "land_category": land_category,
         "permitted_use": permitted_use,
         "permitted_use_codes": permitted_use_codes,
         "subject_region_code": _find_subject_region_code(payload),

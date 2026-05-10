@@ -6,6 +6,667 @@
 
 ---
 
+## 2026-05-10 - Домклик-карта района по bbox вокруг участка
+
+**Что сделано:**
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): добавлен `domclick_land_map_url(lot)`:
+  - берёт координаты из `lot.nspd_centroid_latitude/longitude`, fallback — `lot.latitude/longitude`;
+  - строит bbox вокруг точки с радиусом `MARKETPLACE_MAP_RADIUS_KM` (по умолчанию 5 км);
+  - формирует ссылку Домклик `search/on-map` с `deal_type=sale`, `category=living`, `offer_type=lot`, `sw`, `ne`, `offset=0`;
+  - для региона `72` использует `tyumen.domclick.ru`, для `86` — `xanty-mansijsk.domclick.ru`, для `89` — `salekhard.domclick.ru`, иначе fallback `domclick.ru`.
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): добавлены `INCLUDE_MARKETPLACE_MAP_URLS=true` и `MARKETPLACE_MAP_RADIUS_KM=5`. Текстовые поиски агрегаторов по-прежнему управляются отдельным `INCLUDE_MARKETPLACE_SEARCH_URLS=false`.
+- [backend/app/schemas.py](backend/app/schemas.py), [backend/app/api.py](backend/app/api.py): в API лота добавлено поле `domclick_map_url`.
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): Telegram-карточка добавляет ссылку `Домклик (карта района)` при наличии центроида.
+- [frontend/src/types.ts](frontend/src/types.ts), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx), [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx): UI показывает `Домклик карта` в карточке лота и краткую ссылку в таблице.
+- Проверен НСПД-энричмент:
+  - сухой прогон без `NSPD_VERIFY_TLS=false` падал на `CERTIFICATE_VERIFY_FAILED`;
+  - с process-level `NSPD_VERIFY_TLS=false` dry-run нашёл 5/5 кадастров;
+  - применён ручной enrichment `python scripts/enrich_lots_nspd.py --region 72 --limit 0 --force --include-fresh --commit-every 10` с `NSPD_VERIFY_TLS=false`.
+
+**Итоговые данные:**
+- В текущей dev-БД `lots`: 115.
+- НСПД проверил 86 кадастров: 80 matched, 6 failed.
+- `nspd_card_id/type` заполнены у 80 лотов.
+- НСПД-центроид заполнен у 70 лотов.
+- `domclick_map_url` появляется у 70 лотов.
+- Пример API отдаёт ссылку вида `https://tyumen.domclick.ru/search/on-map?deal_type=sale&category=living&offer_type=lot&sw=...&ne=...&offset=0`.
+
+**Проверки:**
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_external_lot_links.py tests/test_api.py tests/test_alerts_service.py`: 40 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 104 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test -- --run`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `GET http://localhost:8000/api/lots?limit=1&has_cadastral=true`: поле `domclick_map_url` присутствует у лота с НСПД-центроидом.
+- `GET http://localhost:5173`: HTTP 200.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- Для автоматического появления `domclick_map_url` у новых лотов включить НСПД-энричмент в dev/prod окружении (`NSPD_ENABLED=true`; локально при текущей TLS-проблеме ещё `NSPD_VERIFY_TLS=false`).
+- Проверить руками несколько Домклик-карт: насколько bbox 5 км удобен для Тюмени/районов; при необходимости уменьшить радиус для города и увеличить для сельских участков.
+- Следующий слой — аналогичные map-link стратегии для Авито/Циан, если найдём стабильные URL-параметры карты.
+
+---
+
+## 2026-05-10 - Land-filter: автомобили и прочее имущество исключены из lots
+
+**Что сделано:**
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): добавлен флаг `INGEST_ONLY_LAND_LOTS=true` по умолчанию. Это продуктовый MVP-фильтр: в рабочую таблицу `lots` попадают только земельные участки / права на земельные участки.
+- [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py): после detail-fetch добавлен land-filter:
+  - пропускает земельные лоты по `ZK`, ИЖС-признаку и явным маркерам земельного участка;
+  - отсекает автомобили, автобусы, мототехнику, спецтехнику, транспорт, древесину, лесные насаждения, здания, помещения, гаражи, машиноместа и объекты незавершенного строительства;
+  - не использует слишком широкий маркер `землях`, чтобы древесина на землях лесного фонда не проходила как земельный участок.
+- [backend/tests/test_ingest_service.py](backend/tests/test_ingest_service.py): добавлены тесты, что non-land assets не создают `Lot`, а timber/building cases отклоняются.
+- [README.md](README.md), [AGENTS.md](AGENTS.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md): задокументирован продуктовый фильтр земельных лотов.
+- Dev-БД пересобрана live-загрузкой за `2026-05-01` - `2026-05-09` с `TARGET_REGION_CODES=72`, `INGEST_ONLY_LAND_LOTS=true`, `TELEGRAM_ALERTS_ENABLED=false`, `INGEST_DETAIL_MAX_PER_RUN=1000`.
+- Перед пересборками сохранены backup-файлы:
+  - `data/backups/app-before-land-filter-reset-20260510-051832.db`;
+  - `data/backups/app-before-strict-land-filter-reset-20260510-052200.db`.
+- Backend перезапущен с process-level `TARGET_REGION_CODES=72` и `INGEST_ONLY_LAND_LOTS=true`; frontend оставлен запущенным.
+
+**Итоговые данные:**
+- `lots`: 115, все `category=ZK`.
+- `opendata_notices`: 108.
+- `lot_snapshots`: 118.
+- `alert_events`: 0, Telegram во время bulk-загрузки не отправлялся.
+- Явных asset-маркеров в `lots` (`автомоб`, `древес`, `здани`, `помещен`, `транспорт`) не осталось.
+- Качество `/api/lots/quality`: 115 всего, 68 ИЖС-кандидатов, 86 с кадастром, 115 с площадью, 49 с baseline, 24 с положительным дисконтом.
+
+**Проверки:**
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_ingest_service.py`: 11 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 101 passed.
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:8000/api/ingest-status`: scheduler running, `target_region_codes="72"`, следующий запуск `2026-05-11T05:23:56+05:00`.
+- `GET http://localhost:8000/api/lots/quality`: корректная сводка по strict land-БД.
+- `GET http://localhost:8000/api/lots?limit=5&sort=discount_to_baseline_desc`: API отдаёт только земельные лоты.
+- `GET http://localhost:5173`: HTTP 200.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- Если strict land-filter подтвердится на ещё одном live-окне, можно сделать следующий слой: `INGEST_ONLY_IZHS_CANDIDATES` или Telegram-фильтр `TELEGRAM_ALERT_ONLY_IZHS=true` для совсем тихого рабочего потока.
+- `opendata_notices` пока хранит все извещения региона как сырой технический слой; если техническая страница Notices начнёт мешать пользователю, добавить аналогичный фильтр или скрыть её окончательно из MVP UI.
+
+---
+
+## 2026-05-10 - Чистый live-reset dev-БД по региону 72
+
+**Что сделано:**
+- Остановлены dev-процессы backend/frontend перед операциями с SQLite.
+- Текущая `data/app.db` не удалена безвозвратно, а перенесена в backup: `data/backups/app-before-live-reset-20260510-050457.db`.
+- Создана новая чистая SQLite-БД через `python scripts/dev_sync_schema.py`, уже с актуальными колонками текущих моделей.
+- Выполнен live backfill ГИС Торги за окно `2026-05-01` - `2026-05-09` с временными переменными процесса:
+  - `TARGET_REGION_CODES=72`;
+  - `TELEGRAM_ALERTS_ENABLED=false`;
+  - `INGEST_DETAIL_MAX_PER_RUN=1000`.
+- Первый пробный live backfill до `2026-05-10` показал ожидаемую ошибку источника: файл `20260510T0000-20260511T0000` ещё не опубликован ГИС Торги. Чтобы clean-БД не стартовала с `partial_failed`, база была пересобрана заново и загружена до последнего доступного дневного среза.
+- Backend и frontend подняты заново; backend запущен с process-level `TARGET_REGION_CODES=72`, чтобы scheduled/manual ingest в этой dev-сессии оставался в MVP-рамке Тюменской области без правки реального `.env`.
+- [.gitignore](.gitignore): добавлены `data/backups/` и `data/tmp/`, чтобы локальные backup/temp-артефакты reset-процедуры не попадали в `git status`.
+
+**Итоговые данные:**
+- `lots`: 225.
+- `opendata_notices`: 108.
+- `lot_snapshots`: 228.
+- `alert_events`: 0, Telegram во время bulk-загрузки не отправлялся.
+- `ingest_manifest`: 10, все в статусе `processed`.
+- Качество `/api/lots/quality` по региону `72`: 225 всего, 68 ИЖС-кандидатов, 117 с кадастром, 149 с площадью, 83 с baseline, 38 с положительным дисконтом.
+
+**Проверки:**
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:8000/api/ingest-status`: scheduler running, `target_region_codes="72"`, следующий запуск `2026-05-11T05:10:38+05:00`.
+- `GET http://localhost:8000/api/lots/quality`: корректная сводка по чистой базе региона `72`.
+- `GET http://localhost:8000/api/lots?limit=3&sort=discount_to_baseline_desc`: API возвращает лоты с корректными `torgi_url`, `torgi_json_url`, `nspd_map_url`.
+- `GET http://localhost:5173`: HTTP 200.
+
+**TODO:**
+- Если этот региональный фильтр нужно закрепить постоянно, вне текущего запущенного процесса, явно обновить `.env`: `TARGET_REGION_CODES=72`.
+- Следующим шагом стоит включить продуктовый фильтр уведомлений только на релевантные земельные/ИЖС-кандидаты, чтобы бот не шумел объектами недвижимости и нерелевантными торгами при будущих live-изменениях.
+
+---
+
+## 2026-05-10 - НСПД deep link: selectedCard, координаты и fallback по кадастру
+
+**Что сделано:**
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): `nspd_map_url` теперь строит best-effort deep link:
+  - если есть `nspd_card_id`, `nspd_card_type`, центроид и кадастровый номер — добавляет `selectedCard`, `zoom=20`, `coordinate_x`, `coordinate_y`;
+  - если card id/type ещё нет, но есть центроид — открывает НСПД-карту в точке участка, с `zoom=20` и кадастровым номером в `query`;
+  - если есть только кадастровый номер — открывает НСПД-карту с кадастром в `query`.
+- [backend/app/services/nspd/geometry.py](backend/app/services/nspd/geometry.py): добавлен перевод WGS84 `lat/lon` в EPSG:3857 для параметров `coordinate_x/coordinate_y` публичной карты НСПД.
+- [backend/app/models.py](backend/app/models.py), [backend/app/schemas.py](backend/app/schemas.py), [frontend/src/types.ts](frontend/src/types.ts): добавлены поля `nspd_card_id`, `nspd_card_type` для сохранения идентификаторов публичной карточки НСПД.
+- [backend/app/services/nspd/enrich.py](backend/app/services/nspd/enrich.py): НСПД-обогащение теперь пытается извлечь card id/type из разных возможных мест ответа (`feature.id`, `properties.*`, `properties.options.*`) и очищает их при no-match.
+- [backend/alembic/versions/20260510_11_add_lot_nspd_card_fields.py](backend/alembic/versions/20260510_11_add_lot_nspd_card_fields.py): добавлена Alembic-миграция для новых NSPD card columns.
+- Выполнен `python scripts/dev_sync_schema.py`: в текущую SQLite добавлены `lots.nspd_card_id`, `lots.nspd_card_type`; предупреждение по старому FK `lots.opendata_notice_id` осталось ожидаемым для SQLite.
+- Для локального dev-примера `72:24:0609016:181` заполнены `nspd_card_id=291667829`, `nspd_card_type=36384` из пользовательской ссылки, чтобы карточка `lot_id=4191` сразу отдавала `selectedCard`-URL.
+- Обновлены [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md): описан новый контракт НСПД-ссылки.
+
+**Проверки:**
+- `curl.exe -k` к live endpoint НСПД `/api/geoportal/...` из текущей сети вернул `403 Forbidden`, поэтому новые card id/type проверены unit-тестами и локальным backfill по пользовательскому примеру.
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_external_lot_links.py tests/test_nspd_enrich.py tests/test_api.py tests/test_alerts_service.py`: 46 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 99 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `GET http://localhost:8000/api/lots/4191`: `nspd_map_url` содержит `zoom=20`, `coordinate_x/coordinate_y` и `selectedCard=291667829,36384,72:24:0609016:181`.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- После доступного live NSPD enrichment проверить, какие реальные поля ответа стабильно соответствуют `card_id/card_type`, и при необходимости сузить extraction candidates.
+- Для уже обогащённых старых лотов прогнать `python scripts/enrich_lots_nspd.py --force --include-fresh`, когда endpoint НСПД снова доступен без 403, чтобы заполнить `nspd_card_id/type` массово.
+
+---
+
+## 2026-05-10 - Полный dev-рестарт backend/frontend
+
+**Что сделано:**
+- Остановлены старые процессы проекта на портах `8000` и `5173`.
+- Backend поднят заново через `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`; логи пишутся в `data/logs/backend-uvicorn.out.log` и `data/logs/backend-uvicorn.err.log`.
+- Frontend поднят заново через `npm run dev -- --host 0.0.0.0 --port 5173`; логи пишутся в `data/logs/frontend-vite.out.log` и `data/logs/frontend-vite.err.log`.
+
+**Проверки:**
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:8000/api/ingest-status`: scheduler running, `is_running=false`, следующий запуск `2026-05-11T04:24:48+05:00`, `RUN_INGEST_ON_STARTUP=false`.
+- `GET http://localhost:8000/api/lots?limit=1`: API отвечает, поле `nspd_map_url` присутствует.
+- `GET http://localhost:5173`: HTTP 200.
+
+**TODO:**
+- Для проверки нового Telegram-фильтра без шума сделать preview/smoke по реальному `lot_id`, а не отправлять пустые тестовые лоты в рабочий чат.
+
+---
+
+## 2026-05-10 - Telegram: отсечение пустых low-signal алертов
+
+**Что сделано:**
+- По пользовательскому примеру Telegram-сообщения с `Тестовый лот` подтверждён UX-дефект: алерт без кадастра, ИЖС-признака, площади, цены за сотку и baseline выглядел как реальная карточка, хотя не помогал принять решение.
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): добавлен `TELEGRAM_ALERT_SKIP_LOW_SIGNAL=true` по умолчанию. Такие сообщения теперь не отправляются, если одновременно нет ИЖС-признака, нет кадастрового номера, нет цены за сотку и нет baseline-дисконта.
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): добавлена проверка low-signal перед отправкой Telegram; если фильтр выключить для debug, вердикт будет `недостаточно данных для оценки`, а строка `Почему попало` заменена на нейтральные `Сигналы`.
+- [backend/app/services/lot_baseline.py](backend/app/services/lot_baseline.py): уточнены причины невозможности расчёта baseline. Если стартовая цена есть, но нет площади, теперь пишется `Нет площади для расчёта цены за сотку`, а не общее `Нет стартовой цены или площади`.
+- [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py): добавлены тесты на default-skip low-signal алерта и на принудительный debug-режим без старой неоднозначной формулировки.
+- [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md): обновлены описание Telegram-фильтра и текущее число backend-тестов.
+
+**Затронутые файлы:**
+- backend/app/config.py
+- backend/app/services/alerts/service.py
+- backend/app/services/lot_baseline.py
+- backend/tests/test_alerts_service.py
+- .env.example
+- README.md
+- DEVELOPMENT_PLAN.md
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_alerts_service.py`: 9 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 95 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- Сделать preview-команду для форматированного Telegram-алерта по реальному `lot_id`, чтобы визуально проверять сообщение без нового ingest и без тестовых пустых лотов.
+- На живом потоке подобрать, оставлять ли `TELEGRAM_ALERT_SKIP_LOW_SIGNAL=true` как единственный мягкий фильтр или дополнительно включать `TELEGRAM_ALERT_ONLY_IZHS` / `TELEGRAM_ALERT_REQUIRE_CADASTRAL`.
+
+---
+
+## 2026-05-10 - Telegram MVP: компактная карточка и строгий baseline-фильтр
+
+**Что сделано:**
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): Telegram-уведомление пересобрано из технической простыни в компактную MVP-карточку:
+  - верхняя строка теперь сразу даёт событие и вердикт (`Новый лот: интересно, смотреть глубже`);
+  - добавлена строка `ГИС: извещение ..., лот N из M` через `LotSnapshot` и multi-lot payload;
+  - ключевые поля сгруппированы в рабочие строки: локация, кадастр, земля/ВРИ, ИЖС+НСПД, цена, цена за сотку/м², baseline, срок заявок, причина попадания;
+  - raw JSON ГИС Торги перенесён в конец ссылок, чтобы пользователь сначала видел монитор, ГИС-страницу и НСПД-карту;
+  - сохранены пояснения, что baseline пока считается по загруженным торгам, а marketplace-поиск не гарантирует карточку участка.
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): добавлен `TELEGRAM_ALERT_REQUIRE_BASELINE_FOR_DISCOUNT`. Если включён `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE` и этот флаг `true`, лоты без рассчитанного baseline-дисконта не будут попадать в Telegram.
+- [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py): обновлены ожидания нового формата и добавлен тест строгого baseline-фильтра.
+- [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md): обновлены описание компактной Telegram-карточки, production-фильтров и текущее число backend-тестов.
+
+**Затронутые файлы:**
+- backend/app/services/alerts/service.py
+- backend/app/config.py
+- backend/tests/test_alerts_service.py
+- .env.example
+- README.md
+- DEVELOPMENT_PLAN.md
+- AGENTS.md
+- docs/MVP_PRODUCT_CONTRACT.md
+- WORKLOG.md
+
+**Проверки:**
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_alerts_service.py`: 7 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 93 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- После live-прогона на целевом потоке подобрать реальные production-фильтры: `TELEGRAM_ALERT_ONLY_IZHS`, `TELEGRAM_ALERT_REQUIRE_CADASTRAL`, `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE`, `TELEGRAM_ALERT_REQUIRE_BASELINE_FOR_DISCOUNT`.
+- Сделать отдельный preview/smoke для Telegram-карточки по реальному лоту из БД, чтобы перед включением бота визуально проверять формат сообщения без нового ingest.
+
+---
+
+## 2026-05-10 - Контракт MVP: Telegram-first, НСПД-ссылка и matching-логика агрегаторов
+
+**Что сделано:**
+- Пересобран продуктовый контракт MVP в отдельном документе [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md): зафиксированы цель Telegram-first MVP, состав Telegram-уведомления, контракт ссылок, различие между публичным извещением ГИС Торги и конкретным внутренним `notice.lots[]`, а также будущая логика поиска того же участка и рыночных аналогов на Циан/Авито/Домклик.
+- Уточнён главный продуктовый тезис: MVP должен помогать за 1-3 минуты понять, стоит ли лот смотреть глубже; внешние marketplace-ссылки в текущем MVP остаются поисковыми подсказками, а не доказанным совпадением и не рыночной оценкой.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): добавлен `nspd_map_url()` с URL `https://nspd.gov.ru/map?thematic=PKK` при наличии кадастрового номера; legacy `pkk_map_url()` оставлен `None`, чтобы не возвращать нерабочий старый PKK deep link.
+- [backend/app/api.py](backend/app/api.py), [backend/app/schemas.py](backend/app/schemas.py), [frontend/src/types.ts](frontend/src/types.ts): в контракт `/api/lots` и `/api/lots/{id}` добавлено поле `nspd_map_url`.
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): Telegram-уведомление теперь добавляет ссылку `НСПД карта` при наличии кадастрового номера и поясняет, что если участок не открылся автоматически, кадастровый номер нужно вставить в поиск НСПД.
+- [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx): карточка лота показывает ссылку на НСПД-карту в блоке проверки источника и пояснение про поиск по кадастровому номеру.
+- Обновлены [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md): MVP-контракт, `nspd_map_url`, статус 92 backend-тестов, ссылка на новый документ и уточнение, что marketplace-интеграция пока не является автоматической оценкой.
+- Быстро проверен доступ к НСПД-карте из текущей среды: `curl.exe -k -I -L https://nspd.gov.ru/map?thematic=PKK` вернул `200 OK`; без `-k` локальная TLS-цепочка по-прежнему не доверена, что совпадает с dev-флагом `NSPD_VERIFY_TLS=false`.
+
+**Затронутые файлы:**
+- docs/MVP_PRODUCT_CONTRACT.md
+- backend/app/services/external_lot_links.py
+- backend/app/services/alerts/service.py
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/tests/test_external_lot_links.py
+- backend/tests/test_alerts_service.py
+- backend/tests/test_api.py
+- frontend/src/types.ts
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/utils/links.ts
+- README.md
+- DEVELOPMENT_PLAN.md
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `.\\.venv312\\Scripts\\python.exe -m pytest tests/test_external_lot_links.py tests/test_alerts_service.py tests/test_api.py`: 31 passed.
+- `.\\.venv312\\Scripts\\python.exe -m pytest`: 92 passed.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- На машине с российским маршрутом провести live-проверку marketplace-поисков: какие параметры реально дают полезную выдачу на Циан/Авито/Домклик и где возникает captcha/пустая выдача.
+- После НСПД coverage выбрать первый источник аналогов, вероятнее Циан, и начать заполнять `MarketComparable`.
+- Отдельно спроектировать `same_parcel_match` vs `market_analog`: точное совпадение по кадастру не смешивать с оценкой рынка по соседним участкам.
+
+---
+
+## 2026-05-09 - Дефектовка MVP: источник, multi-lot UX и честный baseline
+
+**Что сделано:**
+- Проведена дефектовка концепта “извещение vs лот”: подтверждено, что OpenData `7710568760-notice` отдаёт индекс документов (`regNum`, `documentType`, `subjectEstateCode`, `biddTypeCode`, `href`), а реальные участки для анализа лежат глубже в detail JSON по `href`, в `exportObject.structuredObject.notice.lots[]`.
+- Проверены официальные OpenData-точки ГИС Торги:
+  - `https://torgi.gov.ru/new/opendata/list.json` — машиночитаемый реестр наборов;
+  - `https://torgi.gov.ru/new/opendata/7710568760-notice/meta.json` — список выгрузок извещений;
+  - `https://torgi.gov.ru/new/opendata/7710568760-notice/structure-20240401.json` — схема индексного `listObjects`;
+  - дополнительно просмотрены `masterData`, `protocol`, `contract` как следующий источник для справочников/результатов/договоров, но в этот проход они не подключались.
+- Найден и исправлен дефект discovery: `INGEST_SOURCE_URL` мог указывать на HTML-карточку OpenData, но код воспринимал его как прямой `data-*.json`. Теперь прямым override считается только URL `data-*.json`; карточка обрабатывается как `card_override` и из неё извлекаются актуальные data-ссылки.
+- [backend/app/api.py](backend/app/api.py), [backend/app/schemas.py](backend/app/schemas.py), [frontend/src/types.ts](frontend/src/types.ts): в API добавлены объясняющие поля `notice_reg_num`, `notice_lot_number`, `notice_lot_count`, чтобы карточка могла явно показывать “это лот N из M внутри извещения”.
+- [backend/app/services/lot_baseline.py](backend/app/services/lot_baseline.py), [backend/app/api.py](backend/app/api.py): лоты со `start_price <= 0` больше не участвуют в расчёте ₽/сотка и дисконта к baseline. Это убирает ложный сигнал `100%` дисконта для нулевой стартовой цены.
+- [frontend/src/components/Layout.tsx](frontend/src/components/Layout.tsx): главное меню упрощено до MVP-сценариев `Сводка / Лоты / Загрузки`; технические страницы `/notices` и `/map` остались доступными по маршрутам, но убраны из верхнего меню.
+- [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx): таблица лотов теперь показывает главное действие `Открыть` карточку лота и короткую ссылку `ГИС`; JSON/marketplace-ссылки убраны из списка, чтобы не шуметь.
+- [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx), [frontend/src/styles.css](frontend/src/styles.css): карточка лота получила верхнюю сводку (кадастр, площадь, цена, ₽/сотка, дисконт, срок заявок) и пояснение, что публичная ссылка ГИС Торги ведёт на извещение целиком, а монитор показывает конкретный внутренний лот.
+- Обновлены [README.md](README.md) и [AGENTS.md](AGENTS.md): discovery-chain, новые API-поля, меню MVP и 91 backend test.
+
+**Дефекты/риски по итогам проверки:**
+- Публичный сайт ГИС Торги по-прежнему не даёт стабильного deep link на конкретный элемент `notice.lots[]`; правильная UX-модель — открывать внешний URL извещения и внутри нашего монитора держать точную привязку `regNum + lotNumber`.
+- Для полноценного “мощного сервиса” следующим слоем нужно подключить `masterData` для расшифровки кодов, `protocol`/`contract` для итогов торгов и договоров, а также внешние аналоги рынка. Текущий baseline остаётся внутренней эвристикой по загруженным торгам.
+- В текущей SQLite: `lots_total=4232`, `region72=114`, `multi_lot_rows=40`, `with_cadastral=190`, `with_area=170`, `with_price_area=123`, FK-сирот по `lots/opendata_notices/snapshots/alerts` не найдено. Исторически не все регионы догнаны multi-lot split, но будущий ingest разворачивает новые извещения автоматически.
+
+**Затронутые файлы:**
+- backend/app/services/ingest/discovery.py
+- backend/app/api.py
+- backend/app/schemas.py
+- backend/app/services/lot_baseline.py
+- backend/tests/test_ingest_discovery.py
+- backend/tests/test_api.py
+- frontend/src/components/Layout.tsx
+- frontend/src/components/LotsTable.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/styles.css
+- frontend/src/types.ts
+- README.md
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest`: 91 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+- Backend полностью перезапущен; `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET /api/lots/4231`: `notice_reg_num=22000162030000000177`, `notice_lot_number=4`, `notice_lot_count=5`, `start_price_per_sotka=null`, `discount_to_baseline=null`.
+- Headless Edge screenshots: `data/logs/screenshots/lot-detail-4231-final.png`, `data/logs/screenshots/lots-mobile-ready.png` — явных перекрытий и пустых экранов не обнаружено.
+
+**TODO:**
+- Сформировать отдельную модель/таблицу для `notice_lots` или нормализованных `source_notice_reg_num/source_lot_number`, чтобы не кодировать multi-lot через `source_id`.
+- Подключить `masterData` для человекочитаемых названий кодов `biddTypeCode`, регионов, форм собственности и статусов.
+- Добавить ingestion `protocol`/`contract`, чтобы понимать итоговую цену, победителя и факт заключения договора.
+- После этого пересобрать скоринг: рынок по Циан/Авито/Домклик + протоколы/договоры + НСПД, а не только внутренний baseline.
+
+---
+
+## 2026-05-09 - Multi-lot извещения: разворот в отдельные Lot
+
+**Что сделано:**
+- Проверена гипотеза пользователя: в ГИС Торги OpenData `regNum` — это извещение, а настоящий список участков часто лежит глубже в detail JSON в `exportObject.structuredObject.notice.lots[]`.
+- На живом примере `lot_id=4187` / `regNum=22000162030000000177` подтверждено: одно извещение содержит 5 участков; прежняя логика сохраняла одну строку `lots` и брала поля первым найденным проходом по JSON.
+- [backend/app/services/ingest/service.py](backend/app/services/ingest/service.py): detail-fetch теперь разворачивает `notice.lots[]` в отдельные normalized lot records. Для совместимости первый лот многолотового извещения сохраняет `source_id=regNum`, следующие получают `source_id=regNum:lot:<lotNumber>`.
+- `noticeCancel` / `noticeStop` / `noticeResumption` / `noticeAnnulment` теперь обновляют все строки одного извещения: `regNum` и `regNum:lot:%`.
+- [backend/app/services/ingest/detail_parser.py](backend/app/services/ingest/detail_parser.py): категория земли теперь предпочитает `characteristics[code=PurposeZU]` над общей имущественной категорией `category`.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): публичная ссылка ГИС Торги теперь корректно извлекает номер извещения из multi-lot `source_id` вида `regNum:lot:<lotNumber>`, поэтому список `/api/lots` больше не падает на JSON-ссылку для таких строк.
+- [backend/tests/test_ingest_service.py](backend/tests/test_ingest_service.py): добавлен тест, что одно OpenData-извещение с двумя `lots[]` создаёт две строки в `lots`.
+- [backend/tests/test_detail_parser.py](backend/tests/test_detail_parser.py): добавлен тест на приоритет `PurposeZU` для категории земель.
+- [backend/tests/test_external_lot_links.py](backend/tests/test_external_lot_links.py): добавлен регрессионный тест для `regNum:lot:<lotNumber>`.
+- Локально выполнен безопасный догон существующей SQLite по Тюменской области с отключёнными Telegram-алертами и `NSPD_ENABLED=false`: 31 извещение проверено, 71 фактический лот развернут/обновлён, строк региона 72 стало `114` вместо `74`.
+- Для проблемного извещения `22000162030000000177` теперь есть 5 строк:
+  - `22000162030000000177` — участок 1;
+  - `22000162030000000177:lot:2` — участок 2;
+  - `22000162030000000177:lot:3` — участок 3;
+  - `22000162030000000177:lot:4` — участок с кадастром `72:22:0611001:180`;
+  - `22000162030000000177:lot:5` — участок с кадастром `72:22:0611001:190`.
+- Обновлён [AGENTS.md](AGENTS.md): текущий статус ingest теперь описывает multi-lot split и 89 backend tests.
+
+**Затронутые файлы:**
+- backend/app/services/ingest/service.py
+- backend/app/services/ingest/detail_parser.py
+- backend/app/services/external_lot_links.py
+- backend/tests/test_ingest_service.py
+- backend/tests/test_detail_parser.py
+- backend/tests/test_external_lot_links.py
+- AGENTS.md
+- WORKLOG.md
+- data/app.db (локальная dev-БД, gitignored)
+
+**Проверки:**
+- `python -m pytest tests/test_ingest_service.py::test_run_ingest_splits_multilot_notice_detail ...`: прошло.
+- `python -m pytest tests/test_external_lot_links.py`: 12 passed.
+- `python -m pytest`: 89 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- Backend полностью перезапущен; `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- API после догона показывает новые строки по `source_id like '22000162030000000177%'`; список `/api/lots` и карточка `/api/lots/4231` отдают `torgi_url=https://torgi.gov.ru/new/public/notices/view/22000162030000000177` и отдельный `torgi_json_url` на raw JSON.
+
+**Известные проблемы / TODO:**
+- Ссылка ГИС Торги остаётся ссылкой на извещение, потому что публичный сайт ГИС не даёт стабильный deep link на конкретный элемент `notice.lots[]`. Внутри нашего монитора теперь строка соответствует конкретному участку, а внешний URL ведёт на родительское извещение.
+- Для исторических регионов вне Тюменской области multi-lot догон не выполнялся; будущий ingest будет разворачивать такие извещения автоматически.
+
+---
+
+## 2026-05-09 - Hotfix: рабочий URL карточки ГИС Торги
+
+**Что сделано:**
+- По сообщению пользователя перепроверена ссылка ГИС Торги в браузерном режиме через headless Edge: `/new/public/op/view/{uuid}` открывает SPA, но не рендерит карточку извещения.
+- Подтверждён рабочий официальный маршрут из detail JSON: `/new/public/notices/view/{regNum}`; для `lot_id=4187` страница `https://torgi.gov.ru/new/public/notices/view/22000162030000000177` рендерит карточку `Извещение № 22000162030000000177`.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): `torgi_url` снова строится по реестровому номеру; если в detail payload есть официальный `commonInfo.href`, он используется приоритетно. UUID из имени JSON больше не используется как id публичной страницы.
+- [backend/tests/test_external_lot_links.py](backend/tests/test_external_lot_links.py), [backend/tests/test_api.py](backend/tests/test_api.py): ожидания обновлены на `/new/public/notices/view/{regNum}`.
+- Обновлены [README.md](README.md) и [AGENTS.md](AGENTS.md), чтобы текущий контракт ссылок был описан правильно.
+- Backend принудительно перезапущен; текущий API для `lot_id=4187` отдаёт `torgi_url=https://torgi.gov.ru/new/public/notices/view/22000162030000000177`.
+
+**Затронутые файлы:**
+- backend/app/services/external_lot_links.py
+- backend/tests/test_external_lot_links.py
+- backend/tests/test_api.py
+- README.md
+- AGENTS.md
+- WORKLOG.md
+
+**Проверки:**
+- `python -m pytest tests/test_external_lot_links.py tests/test_api.py::test_lot_detail_returns_notice_payload_when_linked tests/test_alerts_service.py::test_notify_lot_event_sends_html_with_links`: 13 passed.
+- `python -m pytest`: 86 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:8000/api/lots/4187`: `torgi_url` указывает на `/new/public/notices/view/22000162030000000177`, `pkk_map_url=null`, маркетплейс-ссылки пустые.
+
+**Известные проблемы / TODO:**
+- Для ГИС Торги обычная HTTP-проверка недостаточна: SPA отдаёт `200` почти на любой маршрут. Для deep links надо проверять DOM/рендер или доверять официальному `commonInfo.href` из detail JSON.
+
+---
+
+## 2026-05-09 - Исправление внешних ссылок лота
+
+**Что сделано:**
+- Подтверждена проблема пользователя: старый URL ГИС Торги строился как `/new/public/notices/view/{regNum}` и открывал SPA-shell без полезной карточки; ПКК `pkk.rosreestr.ru` больше не даёт надёжный результат; поисковые ссылки Домклик/Авито/Циан часто ведут в капчу/429/401 или пустую выдачу.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): публичная ссылка ГИС Торги теперь строится как `/new/public/op/view/{uuid}`, где UUID берётся из `notice_payload.href`, `notice_detail_url` или `source_url` вида `notice_<regNum>_<uuid>.json`; если UUID не найден, `torgi_url` честно падает обратно на JSON извещения.
+- Legacy `pkk_map_url` оставлен в API для совместимости, но теперь возвращает `null`; фронт больше не достраивает ПКК fallback.
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): `INCLUDE_MARKETPLACE_SEARCH_URLS` выключен по умолчанию; маркетплейс-ссылки остаются только как явный best-effort режим.
+- [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx): убраны ПКК-ссылки из списка и карточки лота.
+- Проверено на живом `lot_id=4187`: `torgi_url=https://torgi.gov.ru/new/public/op/view/702bf5e5-c1fe-43d9-b713-b52e485c6eea`, `torgi_json_url` остаётся прямым JSON, `pkk_map_url=null`.
+
+**Затронутые файлы:**
+- backend/app/services/external_lot_links.py
+- backend/app/config.py
+- backend/app/schemas.py
+- backend/app/services/alerts/service.py
+- backend/tests/test_external_lot_links.py
+- backend/tests/test_api.py
+- backend/tests/test_alerts_service.py
+- frontend/src/components/LotsTable.tsx
+- frontend/src/pages/LotDetailPage.tsx
+- frontend/src/types.ts
+- frontend/src/utils/links.ts
+- .env.example, README.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `python -m pytest tests/test_external_lot_links.py tests/test_api.py::test_lot_detail_returns_notice_payload_when_linked tests/test_alerts_service.py::test_notify_lot_event_sends_html_with_links`: 12 passed.
+- `python -m pytest`: 85 passed.
+- `npx.cmd tsc --noEmit`: прошло.
+- `npm.cmd run test`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только предупреждения Git о будущей замене LF на CRLF.
+
+**Известные проблемы / TODO:**
+- Запущенный backend нужно перезапустить, чтобы он подхватил новый default `INCLUDE_MARKETPLACE_SEARCH_URLS=false` и исправленный генератор ссылок.
+- Надёжный deep link в НСПД-карту пока не добавлен: лучше показывать кадастровый номер и наши координаты/НСПД-данные, чем снова давать ссылку, которая выглядит точной, но не приводит к участку.
+
+---
+
+## 2026-05-09 - Split tunnel: live ГИС Торги, Telegram alerts, НСПД enrichment
+
+**Что сделано:**
+- После настройки split tunneling проверены маршруты:
+  - `https://torgi.gov.ru` стал доступен;
+  - `https://api.telegram.org` доступен из Python-клиента, Telegram smoke вернул `Sent.`;
+  - `https://nspd.gov.ru` доступен, но в текущем split-tunnel режиме отдаёт TLS chain с self-signed certificate.
+- Запущен live fetch свежего OpenData:
+  - `python scripts/fetch_latest_opendata.py`;
+  - скачаны `data-20260508T0000-20260509T0000-structure-20240401.json`, `structure-20240401.json`, `latest_opendata_meta.json`.
+- Запущен точечный live-ingest по Тюменской области за свежий файл:
+  - `INGEST_SOURCE_URL=https://torgi.gov.ru/new/opendata/7710568760-notice/data-20260508T0000-20260509T0000-structure-20240401.json`;
+  - `INGEST_STRUCTURE_URL=https://torgi.gov.ru/new/opendata/7710568760-notice/structure-20240401.json`;
+  - `TARGET_REGION_CODES=72`;
+  - `INGEST_DETAIL_MAX_PER_RUN=80`;
+  - `TELEGRAM_ALERT_ONLY_IZHS=true`;
+  - `python scripts/run_backfill_ingest.py --from-date 2026-05-08 --to-date 2026-05-08`.
+- Результат ingest: `fetched_count=1408`, `upserted_count=19`, `changed_count=19`, `processed_files=1`, `failed_files=0`; новый `IngestRun id=19`, `status=success`.
+- Telegram alert pipeline сработал: появились свежие `AlertEvent` по ИЖС-кандидатам (`lot_id` 4174, 4175, 4177, 4183, 4187).
+- Качество данных по региону 72 после ingest:
+  - `total=74`;
+  - `izhs_candidates=6`;
+  - `with_cadastral=17`;
+  - `with_area=19`;
+  - `with_start_price=21`;
+  - `with_baseline=19`;
+  - `with_positive_discount=8`.
+- [backend/app/config.py](backend/app/config.py), [backend/app/services/nspd/client.py](backend/app/services/nspd/client.py): добавлен `NSPD_VERIFY_TLS` (`true` по умолчанию; локально можно `false` при self-signed chain).
+- [backend/scripts/enrich_lots_nspd.py](backend/scripts/enrich_lots_nspd.py): добавлен фильтр `--region`.
+- Проверен и применён ручной НСПД-догон по Тюменской области:
+  - dry-run: `--limit 5 --force --dry-run --include-fresh` дал `matched=5/5`;
+  - apply: `NSPD_VERIFY_TLS=false python scripts/enrich_lots_nspd.py --region 72 --limit 20 --force`;
+  - результат: `selected=17`, `checked=17`, `matched=16`, `failed=1`;
+  - в БД: 16 лотов региона 72 получили `nspd_enriched_at`, 7 получили `nspd_specified_area_sqm`.
+- Обновлена документация: [.env.example](.env.example), [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md).
+
+**Затронутые файлы:**
+- backend/app/config.py
+- backend/app/services/nspd/client.py
+- backend/scripts/enrich_lots_nspd.py
+- backend/tests/test_nspd_client.py
+- .env.example, README.md, DEVELOPMENT_PLAN.md, AGENTS.md, WORKLOG.md
+- data/raw/latest_opendata_meta.json, data/raw/data-20260508T0000-20260509T0000-structure-20240401.json, data/raw/structure-20240401.json, data/raw/nspd_enrich_report.json (gitignored)
+
+**Проверки:**
+- `python scripts/fetch_latest_opendata.py`: успешно.
+- `python scripts/send_telegram_test.py --text "GIS Torgi Monitor split tunnel smoke"`: `Sent.`
+- `python scripts/run_backfill_ingest.py --from-date 2026-05-08 --to-date 2026-05-08`: `processed_files=1`, `failed_files=0`.
+- `python scripts/enrich_lots_nspd.py --region 72 --limit 20 --force` с `NSPD_VERIFY_TLS=false`: `matched=16`, `failed=1`.
+- `backend/.venv312/Scripts/python.exe -m pytest`: 85 passed.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 3 passed.
+- `npm.cmd run build` в `frontend/`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только предупреждения Git о будущей замене LF на CRLF.
+
+**Известные проблемы / TODO:**
+- НСПД в текущем split-tunnel режиме требует `NSPD_VERIFY_TLS=false`; в production надо держать `true`.
+- Один кадастр НСПД вернул `404 Not Found`: `72:15:0314001:00001`.
+- У отдельных лотов площадь из извещения и НСПД сильно расходится (пример: `72:22:0611001:180`: извещение 855 м², НСПД 586210 м²); по умолчанию `NSPD_MERGE_AREA_POLICY=notice_only`, поэтому основная площадь не перетирается.
+- В `.env` не задан `APP_PUBLIC_BASE_URL`, поэтому ссылка «Монитор» в Telegram не формируется для внешнего открытия.
+
+**Следующее:**
+- Обновить `.env` под рабочий MVP-режим: `TARGET_REGION_CODES=72`, `TELEGRAM_ALERT_ONLY_IZHS=true`, при необходимости `NSPD_ENABLED=true`, `NSPD_VERIFY_TLS=false`, `APP_PUBLIC_BASE_URL=...`.
+- Добавить в Telegram-вердикт явное предупреждение о расхождении площади notice vs НСПД.
+- Начать интеграцию Циан как источника реальных аналогов или хотя бы сохранить первые результаты разведки в `market_comparables`.
+
+---
+
+## 2026-05-09 - MVP bot: вердикт в Telegram и ручной НСПД-догон
+
+**Что сделано:**
+- Проведена диагностика текущего dev-стенда: backend `8000` и frontend `5173` отвечают, в БД есть лоты, Telegram Bot API доступен, `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` заданы.
+- Проверка Telegram smoke прошла: `python scripts/send_telegram_test.py --text "GIS Torgi Monitor MVP smoke: Telegram delivery works."` вернул `Sent.`.
+- Подтвержден сетевой блокер: при текущем VPN `https://torgi.gov.ru` и `https://nspd.gov.ru` уходят в timeout, при этом `https://api.telegram.org` и `https://www.cian.ru` доступны.
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): Telegram-сообщение превращено из простого лога в первичный разбор лота:
+  - человекочитаемый заголовок события;
+  - строка `Вердикт`;
+  - причины попадания в алерт;
+  - кадастр, НСПД-статус, ВРИ, категория земли, муниципалитет/населённый пункт;
+  - стартовая цена, цена за сотку/м², baseline, дисконт, confidence и пояснение;
+  - явная сноска, что baseline по торгам ещё не является рыночной оценкой Циан.
+- Marketplace-ссылки в Telegram сокращены: если есть кадастровый номер, отправляются поиски Домклик/Авито/Циан только по кадастру; расширенный поиск по адресу используется только когда кадастра нет.
+- Добавлен [backend/scripts/enrich_lots_nspd.py](backend/scripts/enrich_lots_nspd.py): ручное обогащение уже существующих лотов через НСПД по кадастровому номеру (`--limit`, `--dry-run`, `--force`, отчёт в `data/raw/nspd_enrich_report.json`).
+- Документация обновлена: [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md).
+
+**Затронутые файлы:**
+- backend/app/services/alerts/service.py
+- backend/scripts/enrich_lots_nspd.py
+- backend/tests/test_alerts_service.py
+- README.md, DEVELOPMENT_PLAN.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `python scripts/send_telegram_test.py --text ...`: `Sent.`
+- `python scripts/enrich_lots_nspd.py --help`: CLI корректно показывает параметры.
+- `backend/.venv312/Scripts/python.exe -m pytest`: 84 passed.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 3 passed.
+- `npm.cmd run build` в `frontend/`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только предупреждения Git о будущей замене LF на CRLF.
+
+**Известные проблемы / TODO:**
+- Live-ingest ГИС Торги и НСПД-обогащение не проверить при текущем VPN: `torgi.gov.ru` и `nspd.gov.ru` недоступны с этой машины.
+- Циан как источник реальных аналогов ещё не интегрирован; сейчас в Telegram/API есть поисковые ссылки и внутренняя baseline-оценка.
+
+**Следующее:**
+- Переключить сеть: split tunneling для `torgi.gov.ru`/`nspd.gov.ru` или временно VPN-off.
+- После доступа к российским сайтам выполнить: connectivity check → малый ingest → `enrich_lots_nspd.py --limit 20 --force` → проверить реальный smart alert.
+
+---
+
+## 2026-05-09 - План доведения MVP к Telegram-боту мониторинга
+
+**Что сделано:**
+- Зафиксирована целевая формулировка MVP: Telegram-бот, который на новых/изменённых лотах ГИС Торги присылает пользователю полезный первичный разбор земельного участка.
+- Уточнена бизнес-задача: сократить ручной поиск и первичный анализ, быстро находить участки с потенциальным дисконтом и принимать решение, стоит ли смотреть глубже и участвовать в аукционе.
+- Зафиксированы источники данных MVP: ГИС Торги как основной реестр, НСПД как кадастрово-пространственная проверка, Циан как первый источник рыночных аналогов; Авито/Домклик — последующие расширения.
+- Уточнено сетевое ограничение рабочей машины: при включённом VPN доступны Telegram/нейросети, но недоступны российские сайты; для live-ingest Торгов/НСПД/Циан нужен VPN-off, split tunneling, прокси или отдельный хост.
+
+**Затронутые файлы:**
+- WORKLOG.md
+
+**Проверки:**
+- Не запускались: запись плановая, код не менялся.
+
+**Известные проблемы / TODO:**
+- Нужно выбрать рабочую сетевую схему для одновременного доступа к российским источникам и Telegram Bot API.
+- Реальная рыночная оценка по Циан ещё не реализована; сейчас есть внутренний baseline по торгам и поисковые ссылки.
+
+**Следующее:**
+- Реализовать/проверить минимальный рабочий поток: ingest ГИС Торги → извлечение кадастра → НСПД enrichment → baseline/аналог → smart Telegram alert.
+
+---
+
+## 2026-05-09 - MVP polish: проверки, Telegram proxy, чистое рабочее дерево
+
+**Что сделано:**
+- Прочитан свежий `WORKLOG.md`, выделены ближайшие MVP-блокеры: окружение frontend-проверок и live-доставка Telegram при недоступном маршруте к `api.telegram.org`.
+- Восстановлены frontend dev-зависимости через `npm install`, после чего `npx tsc --noEmit` и vitest снова проходят локально.
+- [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py), [backend/app/config.py](backend/app/config.py): добавлены `TELEGRAM_PROXY_URL` и `TELEGRAM_TIMEOUT_SECONDS`; отправка в Telegram теперь может идти через HTTP(S)-прокси без правки кода.
+- [backend/scripts/send_telegram_test.py](backend/scripts/send_telegram_test.py): добавлен разовый флаг `--proxy-url` для smoke-проверки через локальный прокси.
+- [.env.example](.env.example), [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md): описаны новые Telegram-настройки и MVP-чеклист для push-алертов.
+- [.gitignore](.gitignore): добавлен ignore для версионированных локальных venv-папок (`.venv*/`, `backend/.venv*/`), чтобы `backend/.venv312/` не шумел в статусе.
+- Запущен [backend/scripts/dev_sync_schema.py](backend/scripts/dev_sync_schema.py); локальная SQLite содержит таблицу `market_comparables`.
+
+**Затронутые файлы:**
+- backend/app/{config.py}
+- backend/app/services/alerts/telegram.py
+- backend/scripts/send_telegram_test.py
+- backend/tests/test_telegram.py
+- .env.example, .gitignore, README.md, DEVELOPMENT_PLAN.md, AGENTS.md, WORKLOG.md
+
+**Проверки:**
+- `backend/.venv312/Scripts/python.exe -m pytest`: 83 passed.
+- `npx.cmd tsc --noEmit` в `frontend/`: прошло.
+- `npm.cmd run test` в `frontend/`: 3 passed.
+- `npm.cmd run build` в `frontend/`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `python scripts/dev_sync_schema.py`: `dev schema sync complete`; осталось существующее предупреждение о FK `lots(opendata_notice_id)` в SQLite.
+- `git diff --check`: без whitespace-ошибок, только предупреждения Git о будущей замене LF на CRLF.
+- `python scripts/send_telegram_test.py --help`: показывает новый `--proxy-url`.
+
+**Известные проблемы / TODO:**
+- Live Telegram smoke не повторялся без прокси: в `.env` сейчас не задан `TELEGRAM_PROXY_URL`, а предыдущий прогон упирался в `ConnectTimeout` к `api.telegram.org`.
+- Реальные рыночные аналоги пока не собираются: есть таблица `market_comparables` и заглушка Циан до live-разведки источников.
+
+**Следующее:**
+- На машине с доступом к Bot API задать `TELEGRAM_PROXY_URL` или выполнить `python scripts/send_telegram_test.py --proxy-url http://127.0.0.1:7890`.
+- Для demo-MVP запустить backend/frontend, затем либо `load_demo_tyumen_data.py --reset`, либо ручной ingest на хосте с доступом к `torgi.gov.ru`.
+
+---
+
+## 2026-05-09 - Локальный запуск SPA + проверка Telegram (smoke)
+
+**Что сделано:**
+- Пользователь настроил бота и `TELEGRAM_*` в корневом `.env`.
+- Backend (uvicorn) уже слушал порт 8000; поднят dev-сервер фронта: `npm run dev` в `frontend/` — Vite на http://localhost:5173/ (и сетевые адреса хоста).
+- Запуск smoke: `python scripts/send_telegram_test.py` из `backend/` с текстом проверки доставки.
+
+**Проверки:**
+- `GET http://127.0.0.1:8000/health` — ок (ранее в сессии).
+- `send_telegram_test.py` — **неуспех**: `httpx.ConnectTimeout` при подключении к `https://api.telegram.org` (сеть/маршрут до Bot API с машины разработчика; токен и chat_id скрипт принял).
+
+**Затронутые файлы:**
+- код не менялся; только операционный прогон.
+
+**Следующее:** с рабочего хоста с доступом к `api.telegram.org` (VPN/другой канал) повторить `send_telegram_test.py`; при необходимости — прокси для httpx в [backend/app/services/alerts/telegram.py](backend/app/services/alerts/telegram.py).
+
+---
+
+## 2026-05-09 - MVP Telegram: smart-фильтры, НСПД merge, каркас рыночных аналогов
+
+**Что сделано:**
+- [backend/app/config.py](backend/app/config.py), [.env.example](.env.example): `TELEGRAM_ALERTS_ENABLED`, `TELEGRAM_ALERT_REQUIRE_CADASTRAL`, `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE`; `NSPD_MERGE_AREA_POLICY`, `NSPD_MERGE_ADDRESS_POLICY` (`notice_only` | `nspd_when_notice_missing` | `prefer_nspd`).
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): порог по `discount_to_baseline` (лоты без baseline не отсекаются), мастер-выключатель и требование кадастра до дедупликации `AlertEvent`.
+- [backend/app/services/nspd/enrich.py](backend/app/services/nspd/enrich.py): `merge_nspd_into_notice_fields` после успешного match по geoportal.
+- [backend/app/models.py](backend/app/models.py), Alembic [backend/alembic/versions/20260509_10_add_market_comparables.py](backend/alembic/versions/20260509_10_add_market_comparables.py): таблица `market_comparables`; заглушка [backend/app/services/market/cian.py](backend/app/services/market/cian.py).
+- Документация: [README.md](README.md) (production checklist, парсер), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [AGENTS.md](AGENTS.md).
+- Тесты: [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py), [backend/tests/test_nspd_enrich.py](backend/tests/test_nspd_enrich.py).
+
+**Проверки:**
+- `python -m pytest` в `backend/`: 82 passed.
+- `npx tsc --noEmit` в `frontend/`: ошибки отсутствующих типов vitest/testing-library в тестах (предсуществующие, фронт не менялся).
+
+**Следующее:** заполнение `market_comparables` после разведки Циан (DEVELOPMENT_PLAN §0.E); при желании UI источника полей notice vs НСПД на карточке лота.
+
+---
+
 ## 2026-05-09 - Telegram-алерты: ссылки Торги/маркетплейсы, устойчивость отправки
 
 **Что сделано:**

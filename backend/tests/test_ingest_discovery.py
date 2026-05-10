@@ -95,6 +95,24 @@ def test_discovery_supports_direct_override(monkeypatch):
     assert "data-" in plan.files[0].source_url
 
 
+def test_discovery_treats_source_url_card_as_card_override(monkeypatch):
+    card_url = "https://torgi.gov.ru/new/public/opendata/61f2a3bf11d8ab36f6c1b275"
+    dataset_url = "https://torgi.gov.ru/new/opendata/7710568760-notice/data-20260427T0000-20260428T0000-structure-20240401.json"
+    card_html = f"<html><body><a href=\"{dataset_url}\">data</a></body></html>"
+
+    monkeypatch.setattr("app.services.ingest.discovery.settings.ingest_source_url", card_url)
+
+    def fake_client_factory(*args, **kwargs):
+        return FakeAsyncClient({card_url: _html_response(card_url, card_html)}, kwargs.get("timeout", 30))
+
+    monkeypatch.setattr(httpx, "AsyncClient", fake_client_factory)
+
+    plan = asyncio.run(build_discovery_plan(mode="operational", last_processed_to=None))
+    assert plan.source_kind == "card_override"
+    assert len(plan.files) >= 1
+    assert all("data-" in item.source_url for item in plan.files)
+
+
 def test_discovery_operational_plans_catchup_with_watermark(monkeypatch):
     registry_url = "https://torgi.gov.ru/new/opendata/list.json"
     dataset_url = "https://torgi.gov.ru/new/opendata/7710568760-notice/data-20260427T0000-20260428T0000-structure-20240401.json"

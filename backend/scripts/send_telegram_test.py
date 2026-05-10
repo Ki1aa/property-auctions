@@ -21,6 +21,11 @@ async def main() -> None:
         default="GIS Torgi Monitor: тест доставки.",
         help="Message body (plain text)",
     )
+    parser.add_argument(
+        "--proxy-url",
+        default=None,
+        help="Optional HTTP(S) proxy URL for this smoke run, e.g. http://127.0.0.1:7890",
+    )
     args = parser.parse_args()
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
         print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env", file=sys.stderr)
@@ -30,6 +35,8 @@ async def main() -> None:
         settings.telegram_chat_id,
         args.text,
         disable_web_page_preview=settings.telegram_disable_web_page_preview,
+        proxy_url=args.proxy_url,
+        timeout_seconds=settings.telegram_timeout_seconds,
     )
     print("Sent.")
 

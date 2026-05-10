@@ -50,6 +50,9 @@ export type Lot = {
   municipality: string | null;
   settlement: string | null;
   is_izhs_candidate: boolean;
+  notice_reg_num: string | null;
+  notice_lot_number: string | null;
+  notice_lot_count: number | null;
   /** Rub per sotka (100 m²) from notice; not market valuation. */
   start_price_per_sotka: number | null;
   /** Rub per m² from notice. */
@@ -66,7 +69,12 @@ export type Lot = {
   torgi_url: string | null;
   /** Raw notice JSON href when it differs from the HTML notice page. */
   torgi_json_url: string | null;
+  /** NSPD public map entry point; cadastral number is shown separately for search. */
+  nspd_map_url: string | null;
+  /** Legacy field; currently null because old PKK deep links are unreliable. */
   pkk_map_url: string | null;
+  /** Domclick map around lot centroid when coordinates are known. */
+  domclick_map_url: string | null;
   domclick_search_url: string | null;
   domclick_search_url_cadastral: string | null;
   avito_search_url: string | null;
@@ -99,6 +107,8 @@ export type LotDetail = Lot & {
   nspd_cost_value: number | null;
   nspd_centroid_latitude: number | null;
   nspd_centroid_longitude: number | null;
+  nspd_card_id: string | null;
+  nspd_card_type: string | null;
   nspd_enriched_at: string | null;
 };
 

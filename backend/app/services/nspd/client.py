@@ -40,6 +40,7 @@ class NspdGeoportalClient:
     base_url: str
     thematic_search_id: int
     timeout_seconds: float
+    verify_tls: bool = True
 
     @classmethod
     def from_settings(cls) -> NspdGeoportalClient:
@@ -48,6 +49,7 @@ class NspdGeoportalClient:
             base_url=base,
             thematic_search_id=settings.nspd_geoportal_thematic_id,
             timeout_seconds=float(settings.nspd_timeout_seconds),
+            verify_tls=settings.nspd_verify_tls,
         )
 
     def search_by_cadastral(self, cadastral_number: str) -> list[dict[str, Any]] | None:
@@ -71,7 +73,12 @@ class NspdGeoportalClient:
             "Referer": f"{self.base_url}/",
             "Origin": self.base_url,
         }
-        with httpx.Client(timeout=self.timeout_seconds, headers=headers, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=self.timeout_seconds,
+            headers=headers,
+            follow_redirects=True,
+            verify=self.verify_tls,
+        ) as client:
             response = client.get(url)
             response.raise_for_status()
             payload = response.json()

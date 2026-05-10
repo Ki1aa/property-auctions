@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import IngestManifest, IngestRun, Lot, OpenDataNotice
 from app.services.ingest.discovery import DiscoveredDatasetFile, DiscoveryPlan
-from app.services.ingest.service import run_ingest
+from app.services.ingest.service import _is_land_lot_candidate, run_ingest
 
 
 def _db_session() -> Session:
@@ -45,10 +45,10 @@ def test_run_ingest_writes_manifest_and_is_idempotent(monkeypatch):
     def fake_normalize(item):
         return {
             "source_id": "lot-1",
-            "title": "Lot 1",
+            "title": "Земельный участок",
             "status": "active",
             "region": "RU",
-            "category": "test",
+            "category": "ZK",
             "start_price": None,
             "current_price": None,
             "start_date": None,
@@ -69,6 +69,7 @@ def test_run_ingest_writes_manifest_and_is_idempotent(monkeypatch):
     monkeypatch.setattr("app.services.ingest.service.normalize_lot", fake_normalize)
     monkeypatch.setattr("app.services.ingest.service.notify_lot_event", fake_notify)
     monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "")
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_only_land_lots", True)
 
     first = asyncio.run(run_ingest(db))
     second = asyncio.run(run_ingest(db))
@@ -91,6 +92,122 @@ def test_run_ingest_writes_manifest_and_is_idempotent(monkeypatch):
     assert runs[0].processed_files == 1
     assert runs[0].failed_files == 0
     assert runs[1].status == "noop"
+
+
+def test_run_ingest_filters_out_non_land_assets(monkeypatch):
+    db = _db_session()
+    file_ref = DiscoveredDatasetFile(
+        source_url="https://example.com/data-20260508T0000-20260509T0000-structure-20240401.json",
+        structure_url="https://example.com/structure-20240401.json",
+        data_from=datetime(2026, 5, 8, tzinfo=timezone.utc),
+        data_to=datetime(2026, 5, 9, tzinfo=timezone.utc),
+        schema_version="20240401",
+        source_kind="registry",
+    )
+
+    async def fake_discovery_plan(*, mode: str, last_processed_to):
+        return DiscoveryPlan(files=[file_ref], source_kind="registry", dataset_id="7710568760-notice")
+
+    async def fake_fetch_with_meta(url: str):
+        return {"items": [{"id": "land"}, {"id": "car"}]}, "l" * 64
+
+    async def fake_fetch_json(url: str):
+        if "structure" in url:
+            return {"fields": []}
+        if "land" in url:
+            return {
+                "lots": [
+                    {
+                        "lotName": "Право аренды земельного участка",
+                        "landCategory": "Земли населенных пунктов",
+                        "cadastralNumbers": ["72:01:0000001:1"],
+                    }
+                ]
+            }
+        return {
+            "lots": [
+                {
+                    "lotName": "Автомобиль легковой",
+                    "category": {"name": "Легковые автомобили"},
+                }
+            ]
+        }
+
+    def fake_normalize(item):
+        is_land = item["id"] == "land"
+        return {
+            "source_id": item["id"],
+            "title": "Земельный участок" if is_land else "Автомобиль легковой",
+            "status": "active",
+            "region": "72",
+            "category": "ZK" if is_land else "178FZ",
+            "start_price": None,
+            "current_price": None,
+            "start_date": None,
+            "end_date": None,
+            "latitude": None,
+            "longitude": None,
+            "source_url": f"https://example.com/notice_{item['id']}.json",
+            "organizer": {"source_id": "org-1", "name": "Org", "inn": None, "kpp": None},
+            "raw": item,
+        }
+
+    async def fake_notify(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.ingest.service.build_discovery_plan", fake_discovery_plan)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload_with_meta", fake_fetch_with_meta)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload", fake_fetch_json)
+    monkeypatch.setattr("app.services.ingest.service.normalize_lot", fake_normalize)
+    monkeypatch.setattr("app.services.ingest.service.notify_lot_event", fake_notify)
+    monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "72")
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_fetch_notice_details", True)
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_only_land_lots", True)
+
+    result = asyncio.run(run_ingest(db))
+    lots = db.scalars(select(Lot)).all()
+
+    assert result["upserted_count"] == 1
+    assert len(lots) == 1
+    assert lots[0].source_id == "land"
+    assert "Автомобиль" not in lots[0].title
+
+
+def test_land_lot_candidate_rejects_timber_and_buildings(monkeypatch):
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_only_land_lots", True)
+
+    assert _is_land_lot_candidate(
+        {
+            "category": "ZK",
+            "title": "Земельный участок с кадастровым номером 72:01:0000001:1",
+            "land_category": "Земли населенных пунктов",
+            "permitted_use": "Для индивидуального жилищного строительства",
+        }
+    )
+    assert not _is_land_lot_candidate(
+        {
+            "category": "178FZ",
+            "title": "Древесина на землях лесного фонда",
+            "land_category": "Древесина",
+            "permitted_use": None,
+        }
+    )
+    assert not _is_land_lot_candidate(
+        {
+            "category": "178FZ",
+            "title": "нежилое здание /земельный участок",
+            "land_category": "Здания",
+            "permitted_use": None,
+        }
+    )
+    assert not _is_land_lot_candidate(
+        {
+            "category": "200FZ",
+            "title": "Право заключения договора купли-продажи лесных насаждений",
+            "land_category": "Земли лесного фонда",
+            "permitted_use": "Заготовка древесины",
+        }
+    )
 
 
 def test_run_ingest_marks_unknown_schema(monkeypatch):
@@ -404,6 +521,96 @@ def test_run_ingest_links_lot_to_opendata_notice(monkeypatch):
     asyncio.run(run_ingest(db_again))
     assert len(db_again.scalars(select(OpenDataNotice)).all()) == 1
     assert len(db_again.scalars(select(Lot)).all()) == 1
+
+
+def test_run_ingest_splits_multilot_notice_detail(monkeypatch):
+    db = _db_session()
+    file_ref = DiscoveredDatasetFile(
+        source_url="https://example.com/data-20260427T0000-20260428T0000-structure-20240401.json",
+        structure_url="https://example.com/structure-20240401.json",
+        data_from=datetime(2026, 4, 27, tzinfo=timezone.utc),
+        data_to=datetime(2026, 4, 28, tzinfo=timezone.utc),
+        schema_version="20240401",
+        source_kind="registry",
+    )
+    opendata_item = {
+        "regNum": "72000000000000000123",
+        "documentType": "notice",
+        "publishDate": "2026-04-27T10:00:00Z",
+        "biddTypeCode": "ZK",
+        "subjectEstateCode": "72",
+        "subjectRightHolderCode": "72",
+        "rightHolderCode": "RH-1",
+        "bidderOrgCode": "BO-1",
+        "href": "https://example.com/docs/notice_72000000000000000123_abc.json",
+    }
+
+    async def fake_discovery_plan(*, mode: str, last_processed_to):
+        return DiscoveryPlan(files=[file_ref], source_kind="registry", dataset_id="7710568760-notice")
+
+    async def fake_fetch_with_meta(url: str):
+        return {"listObjects": [opendata_item]}, "m" * 64
+
+    async def fake_fetch_json(url: str):
+        if "structure" in url:
+            return {"fields": []}
+        return {
+            "exportObject": {
+                "structuredObject": {
+                    "notice": {
+                        "commonInfo": {
+                            "noticeNumber": "72000000000000000123",
+                            "procedureName": "Извещение о предоставлении земельных участков",
+                        },
+                        "lots": [
+                            {
+                                "lotNumber": 1,
+                                "lotName": "Участок 1",
+                                "estateAddress": "Тюменская обл., участок 1",
+                                "cadastralNumbers": ["72:01:0000001:1"],
+                                "estateArea": 600,
+                                "permittedUse": "Для индивидуального жилищного строительства",
+                                "landCategory": "Земли населенных пунктов",
+                            },
+                            {
+                                "lotNumber": 2,
+                                "lotName": "Участок 2",
+                                "estateAddress": "Тюменская обл., участок 2",
+                                "cadastralNumbers": ["72:01:0000001:2"],
+                                "estateArea": 900,
+                                "permittedUse": "Для ведения личного подсобного хозяйства",
+                                "landCategory": "Земли населенных пунктов",
+                            },
+                        ],
+                    }
+                }
+            }
+        }
+
+    async def fake_notify(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("app.services.ingest.service.build_discovery_plan", fake_discovery_plan)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload_with_meta", fake_fetch_with_meta)
+    monkeypatch.setattr("app.services.ingest.service.fetch_json_payload", fake_fetch_json)
+    monkeypatch.setattr("app.services.ingest.service.notify_lot_event", fake_notify)
+    monkeypatch.setattr("app.services.ingest.service.settings.target_region_codes", "72")
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_fetch_notice_details", True)
+    monkeypatch.setattr("app.services.ingest.service.settings.ingest_detail_max_per_run", 10)
+    monkeypatch.setattr("app.services.ingest.service.settings.izhs_keywords", "ИЖС,индивидуальное жилищное")
+
+    result = asyncio.run(run_ingest(db))
+    lots = db.scalars(select(Lot).order_by(Lot.source_id)).all()
+
+    assert result["upserted_count"] == 2
+    assert [lot.source_id for lot in lots] == [
+        "72000000000000000123",
+        "72000000000000000123:lot:2",
+    ]
+    assert [lot.title for lot in lots] == ["Участок 1", "Участок 2"]
+    assert [lot.cadastral_number for lot in lots] == ["72:01:0000001:1", "72:01:0000001:2"]
+    assert [lot.area_sqm for lot in lots] == [600.0, 900.0]
+    assert all(lot.opendata_notice_id is not None for lot in lots)
 
 
 def test_run_ingest_does_not_create_lot_from_clarifications(monkeypatch):

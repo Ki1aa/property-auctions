@@ -12,24 +12,109 @@ def _lot(**kwargs) -> Lot:
     return Lot(**base)
 
 
-def test_pkk_map_url_encodes_cadastral():
-    u = links.pkk_map_url("72:23:0123456:7")
-    assert u is not None
-    assert "pkk.rosreestr.ru" in u
-    assert "72" in u
+def test_pkk_map_url_is_disabled():
+    assert links.pkk_map_url("72:23:0123456:7") is None
+
+
+def test_nspd_map_url_requires_cadastral_number():
+    assert links.nspd_map_url(None) is None
+    assert links.nspd_map_url("") is None
+    assert links.nspd_map_url("72:23:0123456:7") == (
+        "https://nspd.gov.ru/map?thematic=PKK&theme_id=1&baseLayerId=235&"
+        "is_copy_url=true&query=72:23:0123456:7"
+    )
+
+
+def test_nspd_map_url_deep_links_when_card_and_centroid_present():
+    url = links.nspd_map_url(
+        "72:24:0609016:181",
+        centroid_latitude=58.160968393508334,
+        centroid_longitude=68.27459727823052,
+        card_id="291667829",
+        card_type="36384",
+    )
+    assert url is not None
+    assert "zoom=20" in url
+    assert "coordinate_x=" in url
+    assert "coordinate_y=" in url
+    assert "selectedCard=291667829,36384,72:24:0609016:181" in url
+
+
+def test_nspd_map_url_centers_when_only_centroid_present():
+    url = links.nspd_map_url(
+        "72:24:0609016:181",
+        centroid_latitude=58.160968393508334,
+        centroid_longitude=68.27459727823052,
+    )
+    assert url is not None
+    assert "zoom=20" in url
+    assert "coordinate_x=" in url
+    assert "coordinate_y=" in url
+    assert "query=72:24:0609016:181" in url
+    assert "selectedCard=" not in url
+
+
+def test_nspd_lot_map_url_uses_lot_enrichment():
+    lot = _lot(
+        cadastral_number="72:24:0609016:181",
+        nspd_centroid_latitude=58.160968393508334,
+        nspd_centroid_longitude=68.27459727823052,
+        nspd_card_id="291667829",
+        nspd_card_type="36384",
+    )
+    assert "selectedCard=291667829,36384,72:24:0609016:181" in (links.nspd_lot_map_url(lot) or "")
 
 
 def test_torgi_notice_html_from_payload_regnum():
     lot = _lot(source_id="x")
-    payload = {"regNum": "72000000000000000123"}
+    payload = {
+        "regNum": "72000000000000000123",
+        "href": "https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+    }
     assert links.torgi_notice_html_url(lot, payload) == (
         "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
     )
 
 
-def test_torgi_public_prefers_html_over_json():
-    lot = _lot(source_id="72000000000000000999", source_url="https://torgi.gov.ru/x.json", notice_detail_url=None)
-    assert links.torgi_public_url(lot, None) == "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
+def test_torgi_notice_html_prefers_official_detail_href():
+    lot = _lot(source_id="72000000000000000123")
+    payload = {
+        "exportObject": {
+            "structuredObject": {
+                "notice": {
+                    "commonInfo": {
+                        "noticeNumber": "72000000000000000123",
+                        "href": "https://torgi.gov.ru/new/public/notices/view/72000000000000000123",
+                    }
+                }
+            }
+        }
+    }
+    assert links.torgi_notice_html_url(lot, payload) == (
+        "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
+    )
+
+
+def test_torgi_public_prefers_regnum_html_over_json():
+    lot = _lot(
+        source_id="72000000000000000999",
+        source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        notice_detail_url=None,
+    )
+    assert links.torgi_public_url(lot, None) == (
+        "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
+    )
+
+
+def test_torgi_public_uses_notice_regnum_from_multilot_source_id():
+    lot = _lot(
+        source_id="72000000000000000999:lot:4",
+        source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        notice_detail_url=None,
+    )
+    assert links.torgi_public_url(lot, None) == (
+        "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
+    )
 
 
 def test_torgi_public_falls_back_to_json_url():
@@ -52,6 +137,45 @@ def test_domclick_and_avito_use_query_from_lot(monkeypatch):
     assert a is not None and "avito.ru" in a and "q=" in a
 
 
+def test_domclick_map_url_uses_nspd_centroid(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", True)
+    monkeypatch.setattr(links.settings, "marketplace_map_radius_km", 5.0)
+    lot = _lot(
+        region="72",
+        nspd_centroid_latitude=57.1522,
+        nspd_centroid_longitude=65.5272,
+    )
+
+    url = links.domclick_land_map_url(lot)
+
+    assert url is not None
+    assert url.startswith("https://tyumen.domclick.ru/search/on-map?")
+    assert "offer_type=lot" in url
+    assert "sw=57.107284,65.444392" in url
+    assert "ne=57.197116,65.610008" in url
+
+
+def test_domclick_map_url_falls_back_to_lot_coordinates(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", True)
+    lot = _lot(region="86", latitude=61.0, longitude=69.0)
+
+    url = links.domclick_land_map_url(lot)
+
+    assert url is not None
+    assert url.startswith("https://xanty-mansijsk.domclick.ru/search/on-map?")
+
+
+def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
+    lot = _lot(region="72")
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", True)
+    assert links.domclick_land_map_url(lot) is None
+
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", False)
+    lot.nspd_centroid_latitude = 57.1522
+    lot.nspd_centroid_longitude = 65.5272
+    assert links.domclick_land_map_url(lot) is None
+
+
 def test_marketplace_disabled(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
     lot = _lot(cadastral_number="72:01:1:1", region="72")
@@ -62,7 +186,7 @@ def test_marketplace_disabled(monkeypatch):
 def test_torgi_json_link_when_distinct_requires_html_and_differs():
     lot = _lot(
         source_id="72000000000000000123",
-        notice_detail_url="https://torgi.gov.ru/new/api/public/lot/notice.json",
+        notice_detail_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
     )
     payload = {"regNum": "72000000000000000123"}
     assert links.torgi_notice_json_link_when_distinct(lot, payload) == lot.notice_detail_url

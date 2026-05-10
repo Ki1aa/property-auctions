@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { Lot } from "../types";
 import { StatusBadge } from "./StatusBadge";
-import { pkkMapUrl } from "../utils/links";
 
 type Props = {
   lots: Lot[];
@@ -44,31 +43,21 @@ function confidenceLabel(value: string | null): string {
 }
 
 function LotLinksCell({ lot }: { lot: Lot }) {
-  const pkk = lot.pkk_map_url ?? pkkMapUrl(lot.cadastral_number);
-  const external: { href: string; label: string }[] = [];
-  if (lot.app_lot_url) external.push({ href: lot.app_lot_url, label: "Публичный URL" });
-  if (lot.torgi_url) external.push({ href: lot.torgi_url, label: "ГИС Торги" });
-  if (lot.torgi_json_url) external.push({ href: lot.torgi_json_url, label: "Торги JSON" });
-  if (pkk) external.push({ href: pkk, label: "ПКК" });
-  if (lot.domclick_search_url_cadastral)
-    external.push({ href: lot.domclick_search_url_cadastral, label: "Домклик (кад.)" });
-  if (lot.domclick_search_url) external.push({ href: lot.domclick_search_url, label: "Домклик" });
-  if (lot.avito_search_url_cadastral)
-    external.push({ href: lot.avito_search_url_cadastral, label: "Авито (кад.)" });
-  if (lot.avito_search_url) external.push({ href: lot.avito_search_url, label: "Авито" });
-  if (lot.cian_search_url_cadastral)
-    external.push({ href: lot.cian_search_url_cadastral, label: "Циан (кад.)" });
-  if (lot.cian_search_url) external.push({ href: lot.cian_search_url, label: "Циан" });
   return (
     <div className="lots-table__links">
-      <Link to={`/lots/${lot.id}`} className="lots-table__ext-link">
-        В приложении
+      <Link to={`/lots/${lot.id}`} className="button button--compact lots-table__open-link">
+        Открыть
       </Link>
-      {external.map(({ href, label }) => (
-        <a key={label} className="lots-table__ext-link" href={href} target="_blank" rel="noreferrer">
-          {label}
+      {lot.torgi_url ? (
+        <a className="lots-table__ext-link" href={lot.torgi_url} target="_blank" rel="noreferrer">
+          ГИС
         </a>
-      ))}
+      ) : null}
+      {lot.domclick_map_url ? (
+        <a className="lots-table__ext-link" href={lot.domclick_map_url} target="_blank" rel="noreferrer">
+          Домклик
+        </a>
+      ) : null}
     </div>
   );
 }
@@ -88,7 +77,7 @@ export function LotsTable({ lots }: Props) {
           <th className="lots-table__baseline-col">Baseline</th>
           <th className="lots-table__confidence-col">Уверенность</th>
           <th className="lots-table__date-col">Даты торгов</th>
-          <th className="lots-table__links-col">Ссылки</th>
+          <th className="lots-table__links-col">Действие</th>
         </tr>
       </thead>
       <tbody>
@@ -105,6 +94,12 @@ export function LotsTable({ lots }: Props) {
                   {lot.is_izhs_candidate && <span className="badge badge--success">ИЖС</span>}
                 </div>
                 <div className="lots-table__meta">Кадастр: {lot.cadastral_number || "—"}</div>
+                {lot.notice_reg_num && (
+                  <div className="lots-table__meta">
+                    Извещение: {lot.notice_reg_num}
+                    {lot.notice_lot_number ? ` · лот ${lot.notice_lot_number}` : ""}
+                  </div>
+                )}
               </td>
               <td>
                 <StatusBadge status={lot.status} />

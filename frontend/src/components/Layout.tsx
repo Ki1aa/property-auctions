@@ -1,10 +1,8 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  { to: "/", label: "Главная", end: true },
-  { to: "/notices", label: "Извещения" },
+  { to: "/", label: "Сводка", end: true },
   { to: "/lots", label: "Лоты" },
-  { to: "/map", label: "Карта" },
   { to: "/ingest", label: "Загрузки" },
 ];
 
@@ -15,7 +13,7 @@ export function Layout() {
         <div className="header__inner">
           <div className="header__brand">
             <span className="header__logo">ГТ</span>
-            <span className="header__title">ГИС Торги · Мониторинг</span>
+            <span className="header__title">ГИС Торги Monitor</span>
           </div>
           <nav className="nav">
             {navItems.map((item) => (

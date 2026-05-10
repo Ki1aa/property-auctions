@@ -60,6 +60,8 @@ class Lot(Base):
     nspd_cost_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     nspd_centroid_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     nspd_centroid_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nspd_card_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     nspd_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -68,6 +70,7 @@ class Lot(Base):
     organizer: Mapped[Organizer | None] = relationship(back_populates="lots")
     snapshots: Mapped[list["LotSnapshot"]] = relationship(back_populates="lot")
     opendata_notice: Mapped["OpenDataNotice | None"] = relationship(foreign_keys=[opendata_notice_id])
+    market_comparables: Mapped[list["MarketComparable"]] = relationship(back_populates="lot")
 
 
 class LotSnapshot(Base):
@@ -131,6 +134,26 @@ class AlertEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     event_hash: Mapped[str] = mapped_column(String(64), index=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MarketComparable(Base):
+    """Stored marketplace listing snapshots for future valuation (Cian/Avito/Domclick); not filled by ingest yet."""
+
+    __tablename__ = "market_comparables"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lot_id: Mapped[int | None] = mapped_column(ForeignKey("lots.id"), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    external_listing_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    listing_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    price_rub: Mapped[float | None] = mapped_column(Float, nullable=True)
+    area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    region_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lot: Mapped["Lot | None"] = relationship(back_populates="market_comparables")
 
 
 class OpenDataNotice(Base):
