@@ -122,6 +122,9 @@ export type LotDetail = Lot & {
   nspd_cost_value: number | null;
   nspd_centroid_latitude: number | null;
   nspd_centroid_longitude: number | null;
+  /** Web Mercator map center (nspd.gov.ru map coordinate_x / coordinate_y). */
+  nspd_map_coordinate_x: number | null;
+  nspd_map_coordinate_y: number | null;
   nspd_card_id: string | null;
   nspd_card_type: string | null;
   nspd_enriched_at: string | null;

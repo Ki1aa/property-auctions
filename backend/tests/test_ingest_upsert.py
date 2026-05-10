@@ -43,7 +43,7 @@ def test_upsert_creates_snapshot_and_is_idempotent():
     assert len(snapshots) == 1
 
 
-def test_upsert_sends_changed_alert_only_for_price_change(monkeypatch):
+def test_upsert_sends_changed_lot_for_price_or_skips_non_significant_title(monkeypatch):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -83,5 +83,45 @@ def test_upsert_sends_changed_alert_only_for_price_change(monkeypatch):
     price_payload["current_price"] = 15.0
     price_payload["raw"] = {"id": "lot-price", "version": 3, "price": 15.0}
     asyncio.run(_upsert_lot(db, price_payload))
+
+    assert events == ["new_lot", "changed_lot"]
+
+
+def test_upsert_sends_changed_lot_on_status_change_without_price(monkeypatch):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    db: Session = SessionLocal()
+    events: list[str] = []
+
+    async def fake_notify(_db, _lot, event_type, _payload):
+        events.append(event_type)
+
+    monkeypatch.setattr("app.services.ingest.service.notify_lot_event", fake_notify)
+
+    base_payload = {
+        "source_id": "lot-status",
+        "title": "Земельный участок",
+        "status": "active",
+        "region": "72",
+        "category": "ZK",
+        "start_price": 10.0,
+        "current_price": 12.0,
+        "start_date": None,
+        "end_date": None,
+        "latitude": None,
+        "longitude": None,
+        "source_url": "https://example.com",
+        "organizer": {"source_id": "org-1", "name": "Орг 1", "inn": None, "kpp": None},
+        "raw": {"id": "lot-status", "version": 1},
+    }
+
+    import asyncio
+
+    asyncio.run(_upsert_lot(db, dict(base_payload)))
+    status_payload = dict(base_payload)
+    status_payload["status"] = "cancelled"
+    status_payload["raw"] = {"id": "lot-status", "version": 2}
+    asyncio.run(_upsert_lot(db, status_payload))
 
     assert events == ["new_lot", "changed_lot"]

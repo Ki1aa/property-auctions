@@ -28,6 +28,9 @@ def test_extract_nspd_options_from_feature():
     assert out["nspd_readable_address"] == "Test addr"
     assert out["nspd_centroid_latitude"] is not None
     assert out["nspd_centroid_longitude"] is not None
+    # Ring includes closing vertex (0,0) twice; ring average is (4, 4) in EPSG:3857.
+    assert out["nspd_map_coordinate_x"] == 4.0
+    assert out["nspd_map_coordinate_y"] == 4.0
     assert out["nspd_card_id"] == "291667829"
     assert out["nspd_card_type"] == "36384"
 
@@ -43,6 +46,8 @@ def test_apply_nspd_features_empty_clears():
         nspd_card_type="old-type",
         nspd_centroid_latitude=57.0,
         nspd_centroid_longitude=65.0,
+        nspd_map_coordinate_x=1.0,
+        nspd_map_coordinate_y=2.0,
         latitude=55.0,
         longitude=66.0,
     )
@@ -54,6 +59,8 @@ def test_apply_nspd_features_empty_clears():
     assert lot.nspd_enriched_at is not None
     assert isinstance(lot.nspd_enriched_at, datetime)
     assert lot.nspd_centroid_latitude is None
+    assert lot.nspd_map_coordinate_x is None
+    assert lot.nspd_map_coordinate_y is None
     assert lot.map_anchor_latitude == 55.0
     assert lot.map_anchor_longitude == 66.0
     assert lot.map_anchor_source == "notice"

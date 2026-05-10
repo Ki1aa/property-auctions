@@ -9,7 +9,7 @@ from app.config import settings
 from app.models import Lot
 from app.services.lot_identity import lot_notice_identity
 from app.services.map_anchor import lot_map_display_coordinates
-from app.services.nspd.geometry import wgs84_to_epsg3857
+from app.services.nspd.geometry import epsg3857_to_4326, wgs84_to_epsg3857
 
 TORGI_NOTICE_VIEW = "https://torgi.gov.ru/new/public/notices/view/{notice_number}"
 # SPA route: opens the lot info tab (same as links from the notice page).
@@ -134,6 +134,8 @@ def nspd_map_url(
     *,
     centroid_latitude: float | None = None,
     centroid_longitude: float | None = None,
+    mercator_x: float | None = None,
+    mercator_y: float | None = None,
     card_id: str | None = None,
     card_type: str | None = None,
 ) -> str | None:
@@ -144,8 +146,18 @@ def nspd_map_url(
     params: dict[str, str] = dict(NSPD_MAP_BASE_PARAMS)
     card_id_s = (card_id or "").strip()
     card_type_s = (card_type or "").strip()
-    if centroid_latitude is not None and centroid_longitude is not None:
-        x, y = wgs84_to_epsg3857(centroid_latitude, centroid_longitude)
+    has_mercator = mercator_x is not None and mercator_y is not None
+    has_wgs84 = centroid_latitude is not None and centroid_longitude is not None
+    if has_mercator:
+        params.update(
+            {
+                "zoom": "20",
+                "coordinate_x": str(mercator_x),
+                "coordinate_y": str(mercator_y),
+            }
+        )
+    elif has_wgs84:
+        x, y = wgs84_to_epsg3857(float(centroid_latitude), float(centroid_longitude))
         params.update(
             {
                 "zoom": "20",
@@ -153,7 +165,7 @@ def nspd_map_url(
                 "coordinate_y": str(y),
             }
         )
-    if card_id_s and card_type_s and centroid_latitude is not None and centroid_longitude is not None:
+    if card_id_s and card_type_s and (has_mercator or has_wgs84):
         params["selectedCard"] = f"{card_id_s},{card_type_s},{cad}"
     else:
         params["query"] = cad
@@ -182,9 +194,20 @@ def nspd_lot_map_url(lot: Lot) -> str | None:
         lot.cadastral_number,
         centroid_latitude=lat,
         centroid_longitude=lon,
+        mercator_x=lot.nspd_map_coordinate_x,
+        mercator_y=lot.nspd_map_coordinate_y,
         card_id=lot.nspd_card_id,
         card_type=lot.nspd_card_type,
     )
+
+
+def _domclick_map_center_wgs84(lot: Lot) -> tuple[float, float] | None:
+    """Prefer stored NSPD Web Mercator center (same as map URL) for Domclick bbox."""
+    mx = lot.nspd_map_coordinate_x
+    my = lot.nspd_map_coordinate_y
+    if mx is not None and my is not None:
+        return epsg3857_to_4326(float(mx), float(my))
+    return lot_map_display_coordinates(lot)
 
 
 def app_public_lot_url(lot_id: int) -> str | None:
@@ -255,10 +278,10 @@ def _fmt_coord_bbox(value: float) -> str:
 
 
 def domclick_land_map_url(lot: Lot) -> str | None:
-    """On-map search around lot centroid: canonical map anchor (NSPD polygon vs notice); bbox in sw/ne."""
+    """On-map search around lot centroid: NSPD map Mercator center when stored, else map anchor / notice; bbox sw/ne."""
     if not settings.include_marketplace_map_urls:
         return None
-    centroid = lot_map_display_coordinates(lot)
+    centroid = _domclick_map_center_wgs84(lot)
     if centroid is None:
         return None
     lat, lon = centroid

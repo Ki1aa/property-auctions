@@ -114,12 +114,29 @@ def _payload_hash(payload: dict) -> str:
     return hashlib.sha256(str(payload).encode("utf-8")).hexdigest()
 
 
-def _price_changed(old: float | None, new: float | None) -> bool:
-    if old is None and new is None:
-        return False
-    if old is None or new is None:
-        return True
-    return float(old) != float(new)
+def _capture_significant_lot_state(lot: Lot) -> dict[str, Any]:
+    """ORM fields that should trigger a Telegram changed_lot alert when they differ."""
+    cad = (lot.cadastral_number or "").strip()
+    land_cat = (lot.land_category or "").strip()
+    pu = (lot.permitted_use or "").strip()
+    puc = (lot.permitted_use_codes or "").strip()
+    return {
+        "status": lot.status,
+        "start_date": lot.start_date,
+        "end_date": lot.end_date,
+        "start_price": lot.start_price,
+        "current_price": lot.current_price,
+        "area_sqm": lot.area_sqm,
+        "cadastral_number": cad or None,
+        "is_izhs_candidate": bool(lot.is_izhs_candidate),
+        "land_category": land_cat or None,
+        "permitted_use": pu or None,
+        "permitted_use_codes": puc or None,
+    }
+
+
+def _significant_lot_state_changed(before: dict[str, Any], lot: Lot) -> bool:
+    return before != _capture_significant_lot_state(lot)
 
 
 def _pick_items(payload):
@@ -819,8 +836,7 @@ async def _upsert_lot(
     lot = db.scalar(select(Lot).where(Lot.source_id == normalized["source_id"]))
     created = False
     old_hash = None
-    old_start_price: float | None = None
-    old_current_price: float | None = None
+    significant_before: dict[str, Any] | None = None
 
     if lot is None:
         lot = Lot(source_id=normalized["source_id"], title=normalized["title"], organizer_id=organizer.id)
@@ -828,8 +844,7 @@ async def _upsert_lot(
         db.flush()
         created = True
     else:
-        old_start_price = lot.start_price
-        old_current_price = lot.current_price
+        significant_before = _capture_significant_lot_state(lot)
         snapshot = db.scalar(
             select(LotSnapshot).where(LotSnapshot.lot_id == lot.id).order_by(LotSnapshot.id.desc())
         )
@@ -880,13 +895,12 @@ async def _upsert_lot(
     await maybe_enrich_lot_nspd_async(db, lot, nspd_budget)
     refresh_lot_map_anchor(lot)
 
-    price_changed = _price_changed(old_start_price, lot.start_price) or _price_changed(
-        old_current_price,
-        lot.current_price,
+    significant_changed = (
+        bool(significant_before is not None and _significant_lot_state_changed(significant_before, lot))
     )
     if created:
         await notify_lot_event(db, lot, "new_lot", f"{lot.source_id}:{new_hash}")
-    elif changed and price_changed:
+    elif changed and significant_changed:
         await notify_lot_event(db, lot, "changed_lot", f"{lot.source_id}:{new_hash}")
     db.commit()
     return changed

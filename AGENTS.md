@@ -17,7 +17,7 @@
 
 **Источники данных:**
 - ГИС Торги (`torgi.gov.ru`) - основной государственный реестр лотов **(подключён)**.
-- НСПД (`nspd.gov.ru`) - опциональное обогащение при `NSPD_ENABLED` (геопортальный поиск по кадастру, поля `lots.nspd_*`).
+- НСПД (`nspd.gov.ru`) - опциональное обогащение при `NSPD_ENABLED` (геопортальный поиск по кадастру, поля `lots.nspd_*`, в т.ч. Web Mercator центр карты `nspd_map_coordinate_x` / `nspd_map_coordinate_y` как в URL `nspd.gov.ru/map?coordinate_x=&coordinate_y=` для согласованности с Домклик bbox).
 - Циан, Авито, Домклик - рыночные аналоги **(не подключены, в roadmap)**.
 
 **Текущая стадия:** рабочий MVP в dev-режиме на SQLite. Реализован ingest ГИС Торги с фильтрацией по региону, продуктовым land-filter `INGEST_ONLY_LAND_LOTS=true` и обогащением кадастровыми полями из деталей извещений; если detail JSON содержит несколько `notice.lots[]`, ingest разворачивает одно извещение в несколько строк `lots` и сохраняет `notice_reg_num`, `notice_lot_number`, `notice_lot_count` для стабильных ссылок `/new/public/lots/lot/{regNum}_{lotNumber}/(lotInfo:info)`. Опционально при `NSPD_ENABLED` — догрузка площади/адреса/стоимости и центроида из геопортала НСПД в `lots.nspd_*`. Есть внутренняя baseline-оценка по уже загруженным торгам (`baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence`) для первичного ранжирования, но это ещё не рыночная оценка по Циан/Авито. PostgreSQL, полное слияние НСПД с полями извещения, рыночные аналоги и инвестиционный скоринг - в roadmap.
@@ -89,6 +89,7 @@ backend/
     load_demo_tyumen_data.py        # offline demo-БД из data/raw без сети
     reprocess_lots_offline.py       # офлайн-репроцессинг существующих Lot: пересчёт is_izhs_candidate + добор кадастра/ФИАС из LotSnapshot.payload
     enrich_lots_nspd.py             # ручное обогащение существующих Lot через НСПД по кадастру (нужен доступ к nspd.gov.ru)
+    backfill_nspd_map_mercator.py   # заполнить nspd_map_coordinate_* из nspd_centroid_* для старых строк БД
     link_lots_to_notices.py         # backfill Lot.opendata_notice_id по существующим парам href/reg_num
     backfill_lot_notice_identity.py # backfill Lot.notice_reg_num/notice_lot_number/notice_lot_count по source_id/snapshot/notice
     repair_poisoned_ingest_manifests.py  # ingest_manifest: processed+0 при error-envelope или при несоответствии (живой URL непустой, в БД 0 записей)
@@ -336,7 +337,7 @@ python scripts/repair_poisoned_ingest_manifests.py
 - Рыночная медиана по импортированным `MarketComparable` и эвристический `investment_score` в API/UI ([backend/app/services/market_median.py](backend/app/services/market_median.py)); импорт JSON — `python scripts/import_market_comparables_json.py`.
 - Скрипт проверки доступности внешних хостов: `python scripts/check_external_hosts.py`.
 - Offline demo path: `python scripts/load_demo_tyumen_data.py --reset` загружает воспроизводимый набор Тюменской области из `data/raw` без live-сети.
-- Pytest: 125+ тестов (API + baseline/quality metrics/ingest status/manual start, notice_payload/link fields, PKK resolve on lot detail, stable lot notice identity, Telegram/digest, market_median, NSPD client/enrich/deep links, Domclick map bbox, ingest client/discovery/service с region+detail+retry+notice-link+multi-lot split+documentType events+land-filter, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены/категории/ВРИ + ФИАС).
+- Pytest: 130+ тестов (API + baseline/quality metrics/ingest status/manual start, notice_payload/link fields, PKK resolve on lot detail, stable lot notice identity, Telegram/digest, market_median, NSPD client/enrich/deep links, Domclick map bbox, ingest client/discovery/service с region+detail+retry+notice-link+multi-lot split+documentType events+land-filter, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены/категории/ВРИ + ФИАС).
 - SPA: основное меню сфокусировано на Dashboard / Lots / IngestRuns; технические страницы Notices и Map остаются доступными по маршрутам. Lots: пагинация, быстрые фильтры качества, сортировка по ₽/сотка, CSV, регион/муниципалитет/тип; LotDetail показывает ключевую сводку, источник ГИС как извещение и номер внутреннего лота - [frontend/src/](frontend/src).
 - TypeScript-проверка чистая, frontend tests проходят, Vite production build проходит. MapLibre вынесен в отдельный async chunk; предупреждение о крупном chunk теперь относится к лениво загружаемой карте.
 

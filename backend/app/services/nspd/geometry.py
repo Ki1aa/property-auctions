@@ -24,7 +24,8 @@ def wgs84_to_epsg3857(latitude: float, longitude: float) -> tuple[float, float]:
     return (x, y)
 
 
-def polygon_centroid_lat_lon(geometry: dict[str, Any]) -> tuple[float, float] | None:
+def polygon_centroid_wgs84_and_mercator(geometry: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    """Exterior-ring centroid in EPSG:3857 and WGS84 (matches NSPD map `coordinate_x` / `coordinate_y`)."""
     if not isinstance(geometry, dict) or geometry.get("type") != "Polygon":
         return None
     coords = geometry.get("coordinates")
@@ -44,4 +45,10 @@ def polygon_centroid_lat_lon(geometry: dict[str, Any]) -> tuple[float, float] | 
         return None
     cx = sum(xs) / len(xs)
     cy = sum(ys) / len(ys)
-    return epsg3857_to_4326(cx, cy)
+    lat, lon = epsg3857_to_4326(cx, cy)
+    return (lat, lon, cx, cy)
+
+
+def polygon_centroid_lat_lon(geometry: dict[str, Any]) -> tuple[float, float] | None:
+    r = polygon_centroid_wgs84_and_mercator(geometry)
+    return (r[0], r[1]) if r else None

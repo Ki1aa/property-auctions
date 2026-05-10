@@ -386,7 +386,10 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
             "<i>Домклик: карта объявлений вокруг участка для оценки цен соседних лотов; не официальная оценка.</i>"
         )
     if nspd_u:
-        lines.append("<i>НСПД: если карта не откроет участок автоматически, вставьте кадастровый номер в поиск.</i>")
+        lines.append(
+            "<i>НСПД: при обогащении ingest (NSPD_ENABLED) ссылка уже с центром и selectedCard, если геопортал "
+            "вернул карточку; иначе в URL только query по кадастру — тогда вставьте номер в поиск на карте.</i>"
+        )
     region_note = _telegram_region_scope_note()
     if region_note:
         lines.append(f"<i>{_esc_html_text(region_note)}</i>")

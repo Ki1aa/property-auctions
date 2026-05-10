@@ -6,6 +6,30 @@
 
 ---
 
+## 2026-05-11 - MVP Telegram: чеклист env/README, changed_lot по значимым полям
+
+**Что сделано:** В [.env.example](.env.example) блок «MVP operator checklist» (вся РФ в ingest, Telegram 72, ИЖС, NSPD, Domclick Tyumen). В [README.md](README.md) уточнены события Telegram, чеклист и НСПД/Домклик. Ingest: `changed_lot` при изменении статуса, дат, цен, площади, кадастра, ИЖС, категории/ВРИ (не только цена); тест `test_upsert_sends_changed_lot_on_status_change_without_price`. Подсказка в алерте про `selectedCard` после enrich.
+
+**Затронутые файлы:** `.env.example`, `README.md`, `backend/app/services/ingest/service.py`, `backend/tests/test_ingest_upsert.py`, `backend/app/services/alerts/service.py`
+
+**Проверки:** `pytest` (backend) — 136 passed.
+
+---
+
+## 2026-05-12 - НСПД: сохранение Web Mercator центра карты и Домклик
+
+**Что сделано:** Поля `lots.nspd_map_coordinate_x` / `nspd_map_coordinate_y` (EPSG:3857, как в URL `nspd.gov.ru/map`). При обогащении из GeoJSON полигона — тот же центр кольца, что и для `nspd_centroid_*`, без лишнего round-trip WGS84→3857. `nspd_map_url` / `nspd_lot_map_url` при наличии сохранённых значений подставляют их в `coordinate_x` / `coordinate_y`. Ссылка Домклик on-map (`domclick_land_map_url`) для центра bbox предпочитает эти координаты (обратно в WGS84 через `epsg3857_to_4326`). Alembic `20260512_15_nspd_map_mercator`, скрипт `backfill_nspd_map_mercator.py`. API `LotDetail` + `frontend/src/types.ts`.
+
+**Проверки:** `pytest` — 135 passed.
+
+---
+
+## 2026-05-12 - CORS: любой порт localhost для Vite dev
+
+**Что сделано:** В [`backend/app/main.py`](backend/app/main.py) у `CORSMiddleware` добавлен `allow_origin_regex` для `http://localhost:*` и `http://127.0.0.1:*`, чтобы при занятых 5173/5174 Vite не ловил «Failed to fetch» из‑за CORS (например порт 5177).
+
+---
+
 ## 2026-05-12 - Git: `main` на GitHub выровнен под `codex/gis_torgi_v2`
 
 **Что сделано:** Локально `main` сброшен на тот же коммит, что рабочая ветка (`git reset --hard codex/gis_torgi_v2`), на GitHub выполнен `git push origin main --force-with-lease` (`579cb90` → `481c345`). Конфликтный merge `main` + `codex/gis_torgi_v2` отменён: единый источник правды — состояние ветки разработки.

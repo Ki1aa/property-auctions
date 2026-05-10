@@ -62,6 +62,55 @@ def test_nspd_map_url_centers_when_only_centroid_present():
     assert "selectedCard=" not in url
 
 
+def test_nspd_map_url_prefers_explicit_mercator_over_wgs84():
+    url = links.nspd_map_url(
+        "72:24:0504001:705",
+        centroid_latitude=57.0,
+        centroid_longitude=65.0,
+        mercator_x=7600212.321621064,
+        mercator_y=8008854.98231825,
+        card_id="59831300",
+        card_type="36368",
+    )
+    assert url is not None
+    assert "coordinate_x=7600212.321621064" in url
+    assert "coordinate_y=8008854.98231825" in url
+    assert "selectedCard=59831300,36368,72:24:0504001:705" in url
+
+
+def test_domclick_map_prefers_stored_nspd_mercator(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", True)
+    monkeypatch.setattr(links.settings, "marketplace_map_radius_km", 1.0)
+    lot = _lot(
+        region="72",
+        latitude=61.0,
+        longitude=69.0,
+        nspd_map_coordinate_x=0.0,
+        nspd_map_coordinate_y=0.0,
+    )
+    url = links.domclick_land_map_url(lot)
+    assert url is not None
+    # Center from Web Mercator (0,0) -> WGS84 origin, not notice (61, 69).
+    assert "sw=" in url and "ne=" in url
+    assert "61" not in url.split("sw=")[1][:40]
+
+
+def test_nspd_lot_map_url_uses_stored_mercator_coordinates():
+    lot = _lot(
+        cadastral_number="72:24:0504001:705",
+        nspd_centroid_latitude=57.0,
+        nspd_centroid_longitude=65.0,
+        nspd_map_coordinate_x=7600212.321621064,
+        nspd_map_coordinate_y=8008854.98231825,
+        nspd_card_id="59831300",
+        nspd_card_type="36368",
+    )
+    url = links.nspd_lot_map_url(lot)
+    assert url is not None
+    assert "coordinate_x=7600212.321621064" in (url or "")
+    assert "coordinate_y=8008854.98231825" in (url or "")
+
+
 def test_nspd_lot_map_url_uses_lot_enrichment():
     lot = _lot(
         cadastral_number="72:24:0609016:181",

@@ -104,6 +104,8 @@ def try_build_pkk_deep_link_from_geoportal(lot: Lot) -> str | None:
         cad,
         centroid_latitude=float(lat),
         centroid_longitude=float(lon),
+        mercator_x=extracted.get("nspd_map_coordinate_x"),
+        mercator_y=extracted.get("nspd_map_coordinate_y"),
         card_id=str(card_id),
         card_type=str(card_type),
     )

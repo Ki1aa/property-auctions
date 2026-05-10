@@ -63,6 +63,9 @@ class Lot(Base):
     nspd_cost_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     nspd_centroid_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     nspd_centroid_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Web Mercator center of NSPD map deep link (same units as nspd.gov.ru/map?coordinate_x=&coordinate_y=).
+    nspd_map_coordinate_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nspd_map_coordinate_y: Mapped[float | None] = mapped_column(Float, nullable=True)
     nspd_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     nspd_card_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     nspd_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

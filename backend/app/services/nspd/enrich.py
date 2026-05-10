@@ -13,7 +13,7 @@ from app.config import settings
 from app.models import Lot
 from app.services.map_anchor import refresh_lot_map_anchor
 from app.services.nspd.client import NspdGeoportalClient
-from app.services.nspd.geometry import polygon_centroid_lat_lon
+from app.services.nspd.geometry import polygon_centroid_wgs84_and_mercator, wgs84_to_epsg3857
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,11 @@ def extract_nspd_options_from_feature(feature: dict[str, Any]) -> dict[str, Any]
     addr = opts.get("readable_address")
     addr_s = str(addr).strip() if addr is not None and str(addr).strip() else None
     geom = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else None
-    centroid = polygon_centroid_lat_lon(geom) if geom else None
-    lat, lon = centroid if centroid else (None, None)
+    centroid_m = polygon_centroid_wgs84_and_mercator(geom) if geom else None
+    if centroid_m:
+        lat, lon, merc_x, merc_y = centroid_m
+    else:
+        lat, lon, merc_x, merc_y = None, None, None, None
     card_id = _first_text(
         feature.get("id"),
         props.get("id"),
@@ -67,12 +70,16 @@ def extract_nspd_options_from_feature(feature: dict[str, Any]) -> dict[str, Any]
         opts.get("layerId"),
         opts.get("object_type"),
     )
+    if lat is not None and lon is not None and merc_x is None:
+        merc_x, merc_y = wgs84_to_epsg3857(lat, lon)
     return {
         "nspd_specified_area_sqm": area,
         "nspd_cost_value": cost,
         "nspd_readable_address": addr_s,
         "nspd_centroid_latitude": lat,
         "nspd_centroid_longitude": lon,
+        "nspd_map_coordinate_x": merc_x,
+        "nspd_map_coordinate_y": merc_y,
         "nspd_card_id": card_id,
         "nspd_card_type": card_type,
     }
@@ -104,6 +111,8 @@ def apply_nspd_features_to_lot(lot: Lot, features: list[dict[str, Any]]) -> None
         lot.nspd_cost_value = None
         lot.nspd_centroid_latitude = None
         lot.nspd_centroid_longitude = None
+        lot.nspd_map_coordinate_x = None
+        lot.nspd_map_coordinate_y = None
         lot.nspd_card_id = None
         lot.nspd_card_type = None
         refresh_lot_map_anchor(lot)
@@ -114,6 +123,8 @@ def apply_nspd_features_to_lot(lot: Lot, features: list[dict[str, Any]]) -> None
     lot.nspd_cost_value = extracted["nspd_cost_value"]
     lot.nspd_centroid_latitude = extracted["nspd_centroid_latitude"]
     lot.nspd_centroid_longitude = extracted["nspd_centroid_longitude"]
+    lot.nspd_map_coordinate_x = extracted.get("nspd_map_coordinate_x")
+    lot.nspd_map_coordinate_y = extracted.get("nspd_map_coordinate_y")
     lot.nspd_card_id = extracted["nspd_card_id"]
     lot.nspd_card_type = extracted["nspd_card_type"]
     merge_nspd_into_notice_fields(

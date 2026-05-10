@@ -93,6 +93,8 @@ class LotDetail(LotListItem):
     nspd_cost_value: float | None = None
     nspd_centroid_latitude: float | None = None
     nspd_centroid_longitude: float | None = None
+    nspd_map_coordinate_x: float | None = None
+    nspd_map_coordinate_y: float | None = None
     nspd_card_id: str | None = None
     nspd_card_type: str | None = None
     nspd_enriched_at: datetime | None = None
