@@ -16,6 +16,7 @@ from app.services.ingest.client import fetch_json_payload, fetch_json_payload_wi
 from app.services.ingest.detail_parser import match_izhs, parse_notice_detail, split_keywords
 from app.services.ingest.discovery import DiscoveredDatasetFile, build_discovery_plan
 from app.services.ingest.normalizer import normalize_lot
+from app.services.lot_identity import notice_identity_from_values
 from app.services.nspd.enrich import maybe_enrich_lot_nspd_async
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,9 @@ NON_LAND_ASSET_MARKERS = (
     "транспорт",
     "древесин",
     "лесных насаждений",
+    "лесоч",
+    "лесополос",
+    "лесхоз",
     "заготовк",
     "нежил",
     "здани",
@@ -54,6 +58,8 @@ NON_LAND_ASSET_MARKERS = (
     "гараж",
     "машиномест",
     "объект незавершенного",
+    "квартир",
+    "комнат",
 )
 LOT_CREATING_OPENDATA_DOCUMENT_TYPES = frozenset(("notice",))
 OPENDATA_EVENT_STATUS = {
@@ -305,6 +311,7 @@ def _apply_opendata_event_to_existing_lot(
             or_(
                 Lot.source_id == source_id,
                 Lot.source_id.like(f"{source_id}:lot:%"),
+                Lot.notice_reg_num == source_id,
             )
         )
     ).all()
@@ -319,6 +326,9 @@ def _apply_opendata_event_to_existing_lot(
             changed = True
         if opendata_notice_id is not None and lot.opendata_notice_id is None:
             lot.opendata_notice_id = opendata_notice_id
+            changed = True
+        if not lot.notice_reg_num:
+            lot.notice_reg_num = source_id
             changed = True
     if changed:
         db.commit()
@@ -609,6 +619,19 @@ def _raw_for_detail_lot(
     return raw
 
 
+def _apply_notice_identity_defaults(normalized: dict) -> None:
+    identity = notice_identity_from_values(
+        source_id=normalized.get("source_id"),
+        notice_reg_num=normalized.get("notice_reg_num"),
+        notice_lot_number=normalized.get("notice_lot_number"),
+        notice_lot_count=normalized.get("notice_lot_count"),
+        latest_payload=normalized.get("raw") if isinstance(normalized.get("raw"), dict) else None,
+    )
+    normalized["notice_reg_num"] = identity.reg_num
+    normalized["notice_lot_number"] = identity.lot_number
+    normalized["notice_lot_count"] = identity.lot_count
+
+
 def _expanded_normalized_lots_from_detail(
     normalized: dict,
     detail: Any,
@@ -640,6 +663,9 @@ def _expanded_normalized_lots_from_detail(
             total=total,
         )
         lot_normalized["notice_detail_url"] = detail_url
+        lot_normalized["notice_reg_num"] = base_source_id or None
+        lot_normalized["notice_lot_number"] = lot_number
+        lot_normalized["notice_lot_count"] = total
 
         lot_title = (
             str(lot_payload.get("lotName") or "").strip()
@@ -683,13 +709,16 @@ async def _maybe_enrich_with_detail(
     """
     if not settings.ingest_fetch_notice_details:
         normalized.setdefault("is_izhs_candidate", False)
+        _apply_notice_identity_defaults(normalized)
         return already_fetched, [normalized]
     if already_fetched >= settings.ingest_detail_max_per_run:
         normalized.setdefault("is_izhs_candidate", False)
+        _apply_notice_identity_defaults(normalized)
         return already_fetched, [normalized]
     detail_url = normalized.get("source_url")
     if not detail_url:
         normalized.setdefault("is_izhs_candidate", False)
+        _apply_notice_identity_defaults(normalized)
         return already_fetched, [normalized]
 
     try:
@@ -697,6 +726,7 @@ async def _maybe_enrich_with_detail(
     except Exception as exc:  # noqa: BLE001
         logger.warning("Detail fetch failed for %s: %s", detail_url, exc)
         normalized.setdefault("is_izhs_candidate", False)
+        _apply_notice_identity_defaults(normalized)
         return already_fetched, [normalized]
 
     return (
@@ -764,6 +794,9 @@ async def _upsert_lot(
     lot.municipality = normalized.get("municipality")
     lot.settlement = normalized.get("settlement")
     lot.notice_detail_url = normalized.get("notice_detail_url")
+    lot.notice_reg_num = normalized.get("notice_reg_num")
+    lot.notice_lot_number = normalized.get("notice_lot_number")
+    lot.notice_lot_count = normalized.get("notice_lot_count")
     lot.is_izhs_candidate = bool(normalized.get("is_izhs_candidate"))
     if opendata_notice_id is not None:
         lot.opendata_notice_id = opendata_notice_id

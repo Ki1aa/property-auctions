@@ -1,13 +1,14 @@
 import asyncio
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import Lot, LotSnapshot, Organizer
-from app.services.alerts.service import notify_lot_event
+
+from app.models import Lot, LotSnapshot, Organizer, TelegramDigestItem
+from app.services.alerts.service import flush_telegram_digest, notify_lot_event
 from app.services.lot_baseline import LotValuation
 
 
@@ -247,7 +248,7 @@ def test_notify_skipped_when_discount_below_min(monkeypatch, db_session):
         return LotValuation(discount_to_baseline=0.05)
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
-    monkeypatch.setattr("app.services.lot_baseline.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -282,7 +283,7 @@ def test_notify_sent_when_discount_meets_min(monkeypatch, db_session):
         return LotValuation(discount_to_baseline=0.15)
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
-    monkeypatch.setattr("app.services.lot_baseline.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -318,7 +319,7 @@ def test_notify_skipped_when_min_discount_requires_missing_baseline(monkeypatch,
         return LotValuation(discount_to_baseline=None)
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
-    monkeypatch.setattr("app.services.lot_baseline.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_require_baseline_for_discount", True)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
@@ -360,7 +361,7 @@ def test_notify_verdict_marks_interesting_izhs_discount(monkeypatch, db_session)
         )
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
-    monkeypatch.setattr("app.services.lot_baseline.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", None)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -401,3 +402,93 @@ def test_notify_verdict_marks_interesting_izhs_discount(monkeypatch, db_session)
     assert "ГИС: извещение 72000000000000005556, лот 2 из 3" in sent["text"]
     assert "ВРИ похож на ИЖС" in sent["text"]
     assert "дисконт 25.0%" in sent["text"]
+
+
+def test_digest_mode_queues_without_sending(monkeypatch, db_session):
+    sent: dict = {}
+
+    async def capture_send(*_a, **_kw):
+        sent["hit"] = True
+
+    monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_digest_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_only_izhs", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_map_urls", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_quick_links", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.app_public_base_url", "")
+
+    db = db_session()
+    org = Organizer(source_id="od", name="Org")
+    db.add(org)
+    db.flush()
+    lot = Lot(
+        source_id="sd",
+        title="Digest lot",
+        organizer_id=org.id,
+        region="72",
+        cadastral_number="72:01:1:9",
+        area_sqm=600.0,
+        start_price=900_000.0,
+        is_izhs_candidate=True,
+        source_url="https://torgi.gov.ru/x.json",
+    )
+    db.add(lot)
+    db.commit()
+    lot_row = db.scalar(select(Lot).where(Lot.source_id == "sd"))
+
+    asyncio.run(notify_lot_event(db, lot_row, "new_lot", "pay"))
+    db.commit()
+    assert "hit" not in sent
+    n = db.scalar(select(func.count()).select_from(TelegramDigestItem))
+    assert int(n or 0) == 1
+    db.close()
+
+
+def test_flush_digest_sends_and_records_alert_event(monkeypatch, db_session):
+    sent: dict = {}
+
+    async def capture_send(_token, _chat_id, text, **kwargs):
+        sent["text"] = text
+
+    monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_digest_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_map_urls", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_quick_links", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.app_public_base_url", "")
+
+    from app.models import AlertEvent
+
+    db = db_session()
+    org = Organizer(source_id="of", name="Org")
+    db.add(org)
+    db.flush()
+    lot = Lot(
+        source_id="sf",
+        title="Flush digest",
+        organizer_id=org.id,
+        region="72",
+        cadastral_number="72:01:1:8",
+        area_sqm=600.0,
+        start_price=900_000.0,
+        is_izhs_candidate=True,
+        source_url="https://torgi.gov.ru/x.json",
+    )
+    db.add(lot)
+    db.commit()
+    lot_row = db.scalar(select(Lot).where(Lot.source_id == "sf"))
+
+    asyncio.run(notify_lot_event(db, lot_row, "new_lot", "payload-digest"))
+    db.commit()
+    asyncio.run(flush_telegram_digest(db))
+    db.commit()
+
+    assert "Дайджест лотов" in sent["text"]
+    assert db.scalar(select(func.count()).select_from(TelegramDigestItem)) == 0
+    assert db.scalar(select(func.count()).select_from(AlertEvent)) == 1
+    db.close()

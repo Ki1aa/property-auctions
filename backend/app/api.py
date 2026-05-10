@@ -22,6 +22,7 @@ from app.services.external_lot_links import (
     domclick_land_search_url_cadastral_only,
     nspd_lot_map_url,
     pkk_map_url,
+    torgi_notice_html_url,
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
 )
@@ -32,6 +33,8 @@ from app.services.lot_baseline import (
     load_baseline_index,
     lot_valuation,
 )
+from app.services.lot_identity import lot_notice_identity
+from app.services.market_median import load_market_median_stats, valuation_with_market
 from app.schemas import (
     IngestRunView,
     IngestStatusView,
@@ -68,6 +71,31 @@ NoticeSort = Literal[
 ]
 
 
+def _nspd_data_status(lot: Lot) -> str:
+    if lot.nspd_enriched_at is None:
+        return "none"
+    if (
+        lot.nspd_card_id
+        or lot.nspd_specified_area_sqm is not None
+        or lot.nspd_cost_value is not None
+        or (lot.nspd_readable_address or "").strip()
+    ):
+        return "enriched"
+    return "no_data"
+
+
+def _map_centroid_available(lot: Lot) -> bool:
+    if lot.nspd_centroid_latitude is not None and lot.nspd_centroid_longitude is not None:
+        return True
+    if lot.latitude is not None and lot.longitude is not None:
+        return True
+    return False
+
+
+def _merged_valuation(lot: Lot, baseline_index: dict, market_stats: dict) -> LotValuation:
+    return valuation_with_market(lot, lot_valuation(lot, baseline_index), market_stats)
+
+
 def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     if not values:
         return None
@@ -82,40 +110,6 @@ def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
-def _notice_identity(lot: Lot, latest_payload: dict[str, Any] | None = None) -> tuple[str | None, str | None, int | None]:
-    source_id = (lot.source_id or "").strip()
-    notice_reg_num: str | None = None
-    lot_number: str | None = None
-    lot_count: int | None = None
-
-    if ":lot:" in source_id:
-        notice_reg_num, lot_number = source_id.split(":lot:", 1)
-    elif source_id.isdigit():
-        notice_reg_num = source_id
-
-    if latest_payload:
-        raw_count = latest_payload.get("_notice_lot_count")
-        if isinstance(raw_count, int) and raw_count > 0:
-            lot_count = raw_count
-        elif isinstance(raw_count, str) and raw_count.isdigit():
-            lot_count = int(raw_count)
-
-        raw_lot = latest_payload.get("_notice_lot")
-        if isinstance(raw_lot, dict):
-            raw_number = raw_lot.get("lotNumber")
-            if raw_number is not None and str(raw_number).strip():
-                lot_number = str(raw_number).strip()
-
-        raw_index = latest_payload.get("_notice_lot_index")
-        if lot_number is None and isinstance(raw_index, int):
-            lot_number = str(raw_index + 1)
-
-    if lot_count and lot_count > 1 and lot_number is None:
-        lot_number = "1"
-
-    return notice_reg_num, lot_number, lot_count
-
-
 def _lot_list_item(
     lot: Lot,
     valuation: LotValuation | None = None,
@@ -123,7 +117,7 @@ def _lot_list_item(
 ) -> LotListItem:
     ps, pm = derived_prices(lot.start_price, lot.area_sqm)
     valuation = valuation or LotValuation()
-    notice_reg_num, notice_lot_number, notice_lot_count = _notice_identity(lot, latest_payload)
+    notice_identity = lot_notice_identity(lot, latest_payload)
     return LotListItem(
         id=lot.id,
         source_id=lot.source_id,
@@ -143,9 +137,9 @@ def _lot_list_item(
         municipality=lot.municipality,
         settlement=lot.settlement,
         is_izhs_candidate=bool(lot.is_izhs_candidate),
-        notice_reg_num=notice_reg_num,
-        notice_lot_number=notice_lot_number,
-        notice_lot_count=notice_lot_count,
+        notice_reg_num=notice_identity.reg_num,
+        notice_lot_number=notice_identity.lot_number,
+        notice_lot_count=notice_identity.lot_count,
         start_price_per_sotka=ps,
         start_price_per_sqm=pm,
         baseline_price_per_sotka=valuation.baseline_price_per_sotka,
@@ -154,9 +148,16 @@ def _lot_list_item(
         valuation_baseline_scope=valuation.valuation_baseline_scope,
         valuation_baseline_sample_size=valuation.valuation_baseline_sample_size,
         valuation_reason=valuation.valuation_reason,
+        nspd_data_status=_nspd_data_status(lot),
+        map_centroid_available=_map_centroid_available(lot),
+        market_baseline_price_per_sotka=valuation.market_baseline_price_per_sotka,
+        discount_to_market=valuation.discount_to_market,
+        market_valuation_reason=valuation.market_valuation_reason,
+        investment_score=valuation.investment_score,
         app_lot_url=app_public_lot_url(lot.id),
-        torgi_url=torgi_public_url(lot, None),
-        torgi_json_url=torgi_notice_json_link_when_distinct(lot, None),
+        torgi_url=torgi_public_url(lot, None, latest_payload),
+        torgi_notice_url=torgi_notice_html_url(lot, None),
+        torgi_json_url=torgi_notice_json_link_when_distinct(lot, None, latest_payload),
         nspd_map_url=nspd_lot_map_url(lot),
         pkk_map_url=pkk_map_url(lot.cadastral_number),
         domclick_map_url=domclick_land_map_url(lot),
@@ -286,13 +287,14 @@ def list_lots(
         has_price_per_sotka,
     )
     baseline_index = load_baseline_index(db)
+    market_stats = load_market_median_stats(db)
 
     if sort == "discount_to_baseline_desc" or has_positive_discount is not None:
         stmt = select(Lot)
         if filters:
             stmt = stmt.where(and_(*filters))
         all_rows = db.scalars(stmt).all()
-        valuations = {row.id: lot_valuation(row, baseline_index) for row in all_rows}
+        valuations = {row.id: _merged_valuation(row, baseline_index, market_stats) for row in all_rows}
         if has_positive_discount is not None:
             all_rows = [
                 row
@@ -323,7 +325,7 @@ def list_lots(
         stmt = stmt.where(and_(*filters))
     stmt = stmt.offset(offset).limit(limit)
     rows = db.scalars(stmt).all()
-    valuations = {row.id: lot_valuation(row, baseline_index) for row in rows}
+    valuations = {row.id: _merged_valuation(row, baseline_index, market_stats) for row in rows}
     return LotListPage(
         items=[_lot_list_item(row, valuations[row.id]) for row in rows],
         total=total,
@@ -516,6 +518,8 @@ def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)
         with_positive_discount=sum(
             1 for valuation in valuations if lot_has_positive_discount(valuation)
         ),
+        with_nspd_enriched=sum(1 for row in rows if _nspd_data_status(row) == "enriched"),
+        with_map_centroid=sum(1 for row in rows if _map_centroid_available(row)),
     )
 
 
@@ -536,15 +540,18 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         if notice is not None and isinstance(notice.payload, dict):
             notice_payload = notice.payload
 
-    valuation = lot_valuation(lot, load_baseline_index(db))
+    baseline_index = load_baseline_index(db)
+    market_stats = load_market_median_stats(db)
+    valuation = _merged_valuation(lot, baseline_index, market_stats)
     latest_snapshot = db.scalar(
         select(LotSnapshot).where(LotSnapshot.lot_id == lot.id).order_by(desc(LotSnapshot.id))
     )
     latest_payload = latest_snapshot.payload if latest_snapshot is not None and isinstance(latest_snapshot.payload, dict) else None
     list_base = _lot_list_item(lot, valuation, latest_payload)
     list_fields = list_base.model_dump()
-    list_fields["torgi_url"] = torgi_public_url(lot, notice_payload)
-    list_fields["torgi_json_url"] = torgi_notice_json_link_when_distinct(lot, notice_payload)
+    list_fields["torgi_url"] = torgi_public_url(lot, notice_payload, latest_payload)
+    list_fields["torgi_notice_url"] = torgi_notice_html_url(lot, notice_payload)
+    list_fields["torgi_json_url"] = torgi_notice_json_link_when_distinct(lot, notice_payload, latest_payload)
     return LotDetail(
         **list_fields,
         latitude=lot.latitude,
@@ -604,6 +611,9 @@ def get_ingest_status():
         fetch_notice_details=settings.ingest_fetch_notice_details,
         detail_max_per_run=settings.ingest_detail_max_per_run,
         target_region_codes=settings.target_region_codes,
+        telegram_digest_enabled=settings.telegram_digest_enabled,
+        telegram_digest_interval_minutes=settings.telegram_digest_interval_minutes,
+        telegram_digest_next_at=ingest_scheduler.next_telegram_digest_at(),
     )
 
 

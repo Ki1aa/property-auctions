@@ -16,6 +16,11 @@ from app.scheduler import scheduled_ingest, start_scheduler, stop_scheduler
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+
+def _is_sqlite_url(url: str) -> bool:
+    lowered = (url or "").strip().lower()
+    return lowered.startswith("sqlite") or "+sqlite" in lowered
+
 def _close_stale_ingest_runs() -> None:
     """Mark long-running ingest rows as failed after unclean shutdown."""
     threshold = datetime.now(timezone.utc) - timedelta(hours=6)
@@ -39,8 +44,9 @@ def _close_stale_ingest_runs() -> None:
 
 
 async def _startup() -> None:
-    # Dev mode: create local schema automatically for SQLite workflow.
-    Base.metadata.create_all(bind=engine)
+    # SQLite dev: create missing tables. PostgreSQL/production: use Alembic migrations.
+    if _is_sqlite_url(settings.database_url):
+        Base.metadata.create_all(bind=engine)
     _close_stale_ingest_runs()
     start_scheduler()
     db = SessionLocal()

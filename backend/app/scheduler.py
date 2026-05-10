@@ -33,6 +33,16 @@ async def scheduled_ingest() -> None:
     await _run_ingest_guarded(mode="operational", trigger="scheduled")
 
 
+async def scheduled_telegram_digest() -> None:
+    db = SessionLocal()
+    try:
+        from app.services.alerts.service import flush_telegram_digest
+
+        await flush_telegram_digest(db)
+    finally:
+        db.close()
+
+
 def is_ingest_running() -> bool:
     return _ingest_lock.locked() or (
         _background_ingest_task is not None and not _background_ingest_task.done()
@@ -53,10 +63,22 @@ def next_scheduled_ingest_at() -> datetime | None:
     return job.next_run_time if job is not None else None
 
 
+def next_telegram_digest_at() -> datetime | None:
+    job = scheduler.get_job("telegram_digest")
+    return job.next_run_time if job is not None else None
+
+
 def start_scheduler() -> None:
     if scheduler.running:
         return
     scheduler.add_job(scheduled_ingest, "interval", minutes=settings.ingest_interval_minutes, id="daily_ingest")
+    if settings.telegram_digest_enabled and settings.telegram_digest_interval_minutes > 0:
+        scheduler.add_job(
+            scheduled_telegram_digest,
+            "interval",
+            minutes=settings.telegram_digest_interval_minutes,
+            id="telegram_digest",
+        )
     scheduler.start()
 
 

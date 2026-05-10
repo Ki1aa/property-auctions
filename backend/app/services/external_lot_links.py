@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import re
 from math import cos, radians
 from urllib.parse import quote, urlencode
 
 from app.config import settings
 from app.models import Lot
+from app.services.lot_identity import lot_notice_identity
 from app.services.nspd.geometry import wgs84_to_epsg3857
 
 TORGI_NOTICE_VIEW = "https://torgi.gov.ru/new/public/notices/view/{notice_number}"
+TORGI_LOT_VIEW = "https://torgi.gov.ru/new/public/lots/lot/{lot_code}"
 NSPD_PUBLIC_MAP_URL = "https://nspd.gov.ru/map?thematic=PKK"
 NSPD_MAP_BASE_PARAMS = {
     "thematic": "PKK",
@@ -23,28 +24,44 @@ DOMCLICK_HOST_BY_REGION = {
     "86": "xanty-mansijsk.domclick.ru",
     "89": "salekhard.domclick.ru",
 }
+AVITO_LAND_SEARCH_TEMPLATE_BY_REGION = {
+    "72": "https://www.avito.ru/tyumen/zemelnye_uchastki?q={q}",
+    "77": "https://www.avito.ru/moskva/zemelnye_uchastki?q={q}",
+    "78": "https://www.avito.ru/sankt-peterburg/zemelnye_uchastki?q={q}",
+    "50": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?q={q}",
+    "47": "https://www.avito.ru/leningradskaya_oblast/zemelnye_uchastki?q={q}",
+    "23": "https://www.avito.ru/krasnodar/zemelnye_uchastki?q={q}",
+    "66": "https://www.avito.ru/ekaterinburg/zemelnye_uchastki?q={q}",
+    "54": "https://www.avito.ru/novosibirsk/zemelnye_uchastki?q={q}",
+    "24": "https://www.avito.ru/krasnoyarsk/zemelnye_uchastki?q={q}",
+    "61": "https://www.avito.ru/rostov-na-donu/zemelnye_uchastki?q={q}",
+    "16": "https://www.avito.ru/kazan/zemelnye_uchastki?q={q}",
+    "86": "https://www.avito.ru/hanty-mansiysk/zemelnye_uchastki?q={q}",
+    "89": "https://www.avito.ru/salehard/zemelnye_uchastki?q={q}",
+}
+CIAN_LAND_SEARCH_TEMPLATE_BY_REGION = {
+    "72": "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/?text={q}",
+    "77": "https://www.cian.ru/kupit-zemelniy-uchastok-moskva/?text={q}",
+    "78": "https://spb.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "50": "https://www.cian.ru/kupit-zemelniy-uchastok-moskovskaya-oblast/?text={q}",
+    "47": "https://www.cian.ru/kupit-zemelniy-uchastok-leningradskaya-oblast/?text={q}",
+    "23": "https://krasnodar.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "66": "https://ekaterinburg.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "54": "https://novosibirsk.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "24": "https://krasnoyarsk.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "61": "https://rostov.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "16": "https://kazan.cian.ru/kupit-zemelniy-uchastok/?text={q}",
+    "86": "https://www.cian.ru/kupit-zemelniy-uchastok-hanty-mansijskij-avtonomnyj-okrug/?text={q}",
+    "89": "https://www.cian.ru/kupit-zemelniy-uchastok-jamalo-neneckij-avtonomnyj-okrug/?text={q}",
+}
 
 
 def _notice_reg_number(lot: Lot, notice_payload: dict | None) -> str | None:
-    if notice_payload:
-        for key in ("regNum", "noticeNumber", "reg_num"):
-            raw = notice_payload.get(key)
-            if raw is not None and str(raw).strip():
-                return str(raw).strip()
-        common_info = notice_payload.get("commonInfo")
-        if isinstance(common_info, dict):
-            raw = common_info.get("noticeNumber")
-            if raw is not None and str(raw).strip():
-                return str(raw).strip()
-    sid = (lot.source_id or "").strip()
-    if not sid or sid.lower().startswith("http"):
-        return None
-    if len(sid) >= 10 and re.fullmatch(r"\d+", sid):
-        return sid
-    multi_lot_match = re.fullmatch(r"(\d{10,}):lot:.+", sid)
-    if multi_lot_match:
-        return multi_lot_match.group(1)
-    return None
+    return lot_notice_identity(lot, notice_payload=notice_payload).reg_num
+
+
+def _notice_lot_number(lot: Lot, lot_payload: dict | None) -> str | None:
+    return lot_notice_identity(lot, latest_payload=lot_payload).lot_number
 
 
 def _official_notice_href(notice_payload: dict | None) -> str | None:
@@ -90,18 +107,49 @@ def torgi_notice_html_url(lot: Lot, notice_payload: dict | None = None) -> str |
     return TORGI_NOTICE_VIEW.format(notice_number=quote(reg, safe=""))
 
 
-def torgi_public_url(lot: Lot, notice_payload: dict | None = None) -> str | None:
-    """Prefer human-readable notice page; fall back to JSON notice URL."""
-    return torgi_notice_html_url(lot, notice_payload) or torgi_notice_json_url(lot)
+def torgi_lot_html_url(
+    lot: Lot,
+    lot_payload: dict | None = None,
+    notice_payload: dict | None = None,
+) -> str | None:
+    """Official SPA lot card on torgi.gov.ru when notice and lot numbers are known."""
+    identity = lot_notice_identity(lot, latest_payload=lot_payload, notice_payload=notice_payload)
+    reg = identity.reg_num
+    lot_number = identity.lot_number
+    if not reg or not lot_number:
+        return None
+    lot_code = quote(f"{reg}_{lot_number}", safe="_")
+    return TORGI_LOT_VIEW.format(lot_code=lot_code)
 
 
-def torgi_notice_json_link_when_distinct(lot: Lot, notice_payload: dict | None = None) -> str | None:
+def torgi_public_url(
+    lot: Lot,
+    notice_payload: dict | None = None,
+    lot_payload: dict | None = None,
+) -> str | None:
+    """Prefer human-readable lot page; fall back to notice page, then JSON."""
+    return (
+        torgi_lot_html_url(lot, lot_payload=lot_payload, notice_payload=notice_payload)
+        or torgi_notice_html_url(lot, notice_payload)
+        or torgi_notice_json_url(lot)
+    )
+
+
+def torgi_notice_json_link_when_distinct(
+    lot: Lot,
+    notice_payload: dict | None = None,
+    lot_payload: dict | None = None,
+) -> str | None:
     """Second link for UI/Telegram: raw JSON href when it differs from the HTML card URL."""
-    html_u = (torgi_notice_html_url(lot, notice_payload) or "").strip().rstrip("/")
+    html_urls = {
+        (torgi_lot_html_url(lot, lot_payload=lot_payload, notice_payload=notice_payload) or "").strip().rstrip("/"),
+        (torgi_notice_html_url(lot, notice_payload) or "").strip().rstrip("/"),
+    }
     json_u = (torgi_notice_json_url(lot) or "").strip().rstrip("/")
     if not json_u:
         return None
-    if html_u and json_u != html_u:
+    html_urls.discard("")
+    if html_urls and json_u not in html_urls:
         return json_u.strip() or None
     return None
 
@@ -175,8 +223,15 @@ def _marketplace_search_query_cadastral_only(lot: Lot) -> str | None:
     return c or None
 
 
-def _marketplace_url_from_template(template: str, query: str | None) -> str | None:
-    if not settings.include_marketplace_search_urls:
+def _marketplace_url_from_template(
+    template: str,
+    query: str | None,
+    *,
+    enabled: bool | None = None,
+) -> str | None:
+    if enabled is None:
+        enabled = settings.include_marketplace_search_urls
+    if not enabled:
         return None
     q = (query or "").strip()
     if not q:
@@ -186,6 +241,15 @@ def _marketplace_url_from_template(template: str, query: str | None) -> str | No
         return None
     enc = quote(q, safe="")
     return t.format(q=enc)
+
+
+def _marketplace_quick_links_enabled() -> bool:
+    return bool(settings.include_marketplace_quick_links or settings.include_marketplace_search_urls)
+
+
+def _regional_template(region_templates: dict[str, str], lot: Lot, fallback: str) -> str:
+    region = str(lot.region or "").strip()
+    return region_templates.get(region) or fallback
 
 
 def _valid_lat_lon(latitude: float | None, longitude: float | None) -> tuple[float, float] | None:
@@ -258,23 +322,29 @@ def domclick_land_search_url_cadastral_only(lot: Lot) -> str | None:
 def avito_search_url(lot: Lot) -> str | None:
     """Best-effort Avito search for land listings."""
     return _marketplace_url_from_template(
-        settings.avito_land_search_template, _marketplace_search_query_full(lot)
+        _regional_template(AVITO_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.avito_land_search_template),
+        _marketplace_search_query_full(lot),
     )
 
 
 def avito_search_url_cadastral_only(lot: Lot) -> str | None:
     return _marketplace_url_from_template(
-        settings.avito_land_search_template, _marketplace_search_query_cadastral_only(lot)
+        _regional_template(AVITO_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.avito_land_search_template),
+        _marketplace_search_query_cadastral_only(lot),
+        enabled=_marketplace_quick_links_enabled(),
     )
 
 
 def cian_land_search_url(lot: Lot) -> str | None:
     return _marketplace_url_from_template(
-        settings.cian_land_search_template, _marketplace_search_query_full(lot)
+        _regional_template(CIAN_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.cian_land_search_template),
+        _marketplace_search_query_full(lot),
     )
 
 
 def cian_land_search_url_cadastral_only(lot: Lot) -> str | None:
     return _marketplace_url_from_template(
-        settings.cian_land_search_template, _marketplace_search_query_cadastral_only(lot)
+        _regional_template(CIAN_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.cian_land_search_template),
+        _marketplace_search_query_cadastral_only(lot),
+        enabled=_marketplace_quick_links_enabled(),
     )

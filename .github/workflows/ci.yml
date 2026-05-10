@@ -18,6 +18,35 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
 
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gis_user
+          POSTGRES_PASSWORD: gis_password
+          POSTGRES_DB: gis_torgi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gis_user -d gis_torgi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://gis_user:gis_password@localhost:5432/gis_torgi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

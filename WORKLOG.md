@@ -6,6 +6,201 @@
 
 ---
 
+## 2026-05-11 - План roadmap: агрегаторы, НСПД, Telegram digest, рынок, prod-CI
+
+**Что сделано:**
+- Региональные шаблоны Авито/Циан для ряда субъектов РФ; скрипт [backend/scripts/check_external_hosts.py](backend/scripts/check_external_hosts.py) (DNS + HEAD, IP для WireSock).
+- Расширен land-filter (лес/квартира и др. маркеры); скрипт закрытого backfill-окна [backend/scripts/run_backfill_closed_window.py](backend/scripts/run_backfill_closed_window.py); `/api/lots/quality` — счётчики НСПД и центроида; API/UI: `nspd_data_status`, `map_centroid_available`, рыночные поля и `investment_score` через [backend/app/services/market_median.py](backend/app/services/market_median.py); импорт аналогов [backend/scripts/import_market_comparables_json.py](backend/scripts/import_market_comparables_json.py).
+- НСПД: `--only-missing`, детализация ошибок в отчёте enrich; регрессия ссылок (тесты domclick/NSPD уже были — добавлен тест региональных quick links).
+- Telegram: `TELEGRAM_DIGEST_*`, очередь `telegram_digest_items`, `flush_telegram_digest`, APScheduler job; `TELEGRAM_ALERT_REQUIRE_DISCOUNT_OR_PER_SOTKA`; блок «Почему интересно»; `/api/ingest-status` — поля digest.
+- Prod/dev: `create_all` только для SQLite; Docker CMD `alembic upgrade head`; CI job `migrations` на PostgreSQL; README — docker, backup, скрипты.
+
+**Проверки:**
+- `python -m pytest` в `backend`: 115 passed.
+- `npx tsc --noEmit`, `npm run test`, `npm run build` в `frontend`: ок.
+
+---
+
+## 2026-05-10 - Верификация ссылок ГИС для multi-lot (продолжение)
+
+**Что сделано:**
+- Live API: `GET /api/lots/101` и лот `101` в `GET /api/lots?limit=500` — `torgi_url` = `https://torgi.gov.ru/new/public/lots/lot/21000030190000000072_2`, `torgi_notice_url` на извещение без номера лота.
+- SQL по `data/app.db`: для всех групп с `notice_lot_count > 1` минимальный числовой `notice_lot_number` равен `1` (в демо-наборе нет извещения, где нумерация внутренних лотов начинается не с единицы).
+- Кейс «внутренний лот не первый» покрыт тестом [backend/tests/test_api.py](backend/tests/test_api.py) `test_lots_list_uses_stored_notice_identity_for_torgi_lot_url` (`notice_lot_number=7`, список `/api/lots` без подгрузки `LotSnapshot`).
+
+**Проверки:**
+- `python -m pytest` в `backend`: 111 passed.
+
+**Следующее:** при появлении в прод-данных извещения с `lotNumber` не с `1` — повторить spot-check; опционально `git commit` / `push` ветки `codex/gis_torgi_v2` по запросу.
+
+---
+
+## 2026-05-10 - Стабильная идентичность multi-lot извещений
+
+**Что сделано:**
+- Добавлены поля `lots.notice_reg_num`, `lots.notice_lot_number`, `lots.notice_lot_count` для стабильной привязки внутренних лотов к извещению ГИС Торги.
+- Добавлена Alembic-миграция `20260510_12_lot_notice_identity_fields`; `dev_sync_schema.py` применён к локальной SQLite.
+- Ingest теперь сохраняет `notice_*` при detail-fetch и multi-lot split; event-документы ищут связанные лоты также по `Lot.notice_reg_num`.
+- Вынесен общий helper [backend/app/services/lot_identity.py](backend/app/services/lot_identity.py), чтобы API, Telegram и external links использовали одинаковую логику fallback.
+- Добавлен backfill [backend/scripts/backfill_lot_notice_identity.py](backend/scripts/backfill_lot_notice_identity.py); текущая dev-БД обновлена: `115` из `115` лотов получили `notice_reg_num` и `notice_lot_number`.
+- Обновлены [backend/scripts/link_lots_to_notices.py](backend/scripts/link_lots_to_notices.py) и demo-loader, чтобы при догонке/демо тоже заполнялись новые поля.
+- Обновлена документация: [AGENTS.md](AGENTS.md), [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
+
+**Проверки:**
+- `python -m pytest tests/test_lot_identity.py tests/test_external_lot_links.py tests/test_api.py tests/test_ingest_service.py`: 49 passed.
+- `python -m pytest` в `backend`: 111 passed.
+- `npx.cmd tsc --noEmit` в `frontend`: прошло.
+- `npm.cmd run test -- --run`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- Live API `GET http://localhost:8000/api/lots?limit=1&has_cadastral=true`: `notice_lot_number=1`, `notice_lot_count=5`, `torgi_url=https://torgi.gov.ru/new/public/lots/lot/22000004000000000180_1`.
+- `GET http://localhost:8000/health`: `{"status":"ok"}`; `GET http://localhost:5173`: HTTP 200.
+
+**TODO:**
+- При следующем clean ingest проверить несколько свежих multi-lot извещений, где первый внутренний `lotNumber` не равен `1`, чтобы подтвердить, что список `/api/lots` строит ссылку строго из сохранённого `notice_lot_number`.
+
+---
+
+## 2026-05-10 - Быстрые ссылки Авито/Циан по кадастру
+
+**Что сделано:**
+- Добавлен флаг `INCLUDE_MARKETPLACE_QUICK_LINKS=true`: API/UI/Telegram теперь показывают быстрые кадастровые ссылки на Авито и Циан даже при выключенном расширенном `INCLUDE_MARKETPLACE_SEARCH_URLS`.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): добавлены региональные шаблоны для Тюменской области:
+  - Авито: `https://www.avito.ru/tyumen/zemelnye_uchastki?q={q}`;
+  - Циан: `https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/?text={q}`.
+- [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx): в таблице лотов добавлены короткие действия `Авито` и `Циан`.
+- [frontend/src/styles.css](frontend/src/styles.css): исправлен mobile overflow карточки лота; строки `card__row` на узких экранах переходят в вертикальный layout, примечания переносят длинные кадастровые номера.
+- Обновлена документация: [.env.example](.env.example), [AGENTS.md](AGENTS.md), [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
+
+**Проверки:**
+- `python -m pytest tests/test_external_lot_links.py tests/test_api.py tests/test_alerts_service.py`: 42 passed.
+- `python -m pytest` в `backend`: 106 passed.
+- `npx.cmd tsc --noEmit` в `frontend`: прошло.
+- `npm.cmd run test -- --run`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- Live API `GET http://127.0.0.1:8000/api/lots?limit=1&has_cadastral=true`: для лота `101` появились `avito_search_url_cadastral` и `cian_search_url_cadastral`.
+- Визуально проверены `http://localhost:5173/lots` и `http://localhost:5173/lots/101`; скриншоты сохранены в `data/tmp/visual-review/`.
+- `GET http://localhost:8000/health`: `{"status":"ok"}`; `GET http://localhost:5173`: HTTP 200.
+
+**TODO:**
+- Позже можно добавить региональные шаблоны Авито/Циан для других регионов, когда ingest снова будет загружать не только `72`.
+
+---
+
+## 2026-05-10 - Проверка кода и визуальная оценка сервиса
+
+**Что сделано:**
+- Проведён review текущего diff после разведения ссылок ГИС Торги на `torgi_url` (лот) и `torgi_notice_url` (извещение).
+- Проверены live-экраны `http://localhost:5173/`, `/lots`, `/lots/101`, `/ingest` через браузерный DOM.
+- Сняты desktop/mobile скриншоты Chrome в `data/tmp/visual-review/` для Dashboard, списка лотов и карточки лота.
+- Подтверждено, что `/api/lots?limit=1&has_cadastral=true` отдаёт:
+  - `torgi_url=https://torgi.gov.ru/new/public/lots/lot/21000030190000000072_2`;
+  - `torgi_notice_url=https://torgi.gov.ru/new/public/notices/view/21000030190000000072`.
+
+**Проверки:**
+- `python -m pytest` в `backend`: 105 passed.
+- `npx.cmd tsc --noEmit` в `frontend`: прошло.
+- `npm.cmd run test -- --run`: 3 passed.
+- `npm.cmd run build`: прошло, осталось известное предупреждение Vite о крупном lazy chunk `TradesMap`.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+- Browser console на `/ingest`: ошибок нет.
+
+**Наблюдения:**
+- Desktop `/lots` и `/lots/101`: ссылки `ГИС лот` / `Извещение` визуально разделены и читаются.
+- Mobile `/lots/101`: есть горизонтальный overflow в блоке `Проверка источника`; правые ссылки обрезаются на ширине около 390px.
+- Mobile `/lots`: фильтры читаемы, но таблица закономерно рассчитана на горизонтальный скролл из-за `min-width: 1180px`.
+- Кодовый риск: список `/api/lots` не подгружает `latest_payload` для каждой строки, поэтому для первого лота multi-lot извещения без суффикса `:lot:` ссылка строится как `{regNum}_1`. В текущей dev-БД первые лоты multi-lot действительно имеют `lotNumber=1`, но при нестандартной нумерации безопаснее будет передавать snapshot payload или хранить `notice_lot_number` отдельно.
+
+**TODO:**
+- Исправить mobile overflow карточки: на `max-width: 720px` перевести `.card__row` в вертикальный layout, убрать `text-align:right` у значения и дать ссылкам переноситься по строкам.
+- Для долгосрочной надёжности ссылок ГИС Торги вынести `notice_lot_number` в поле модели/БД или подмешивать latest snapshot payload в list endpoint без N+1.
+
+---
+
+## 2026-05-10 - ГИС Торги: отдельные ссылки на лот и извещение
+
+**Что сделано:**
+- Проверен VPN-bypass/сетевой доступ после добавления IP:
+  - `torgi.gov.ru`: DNS `95.167.245.141`, HTTP 302 -> 200;
+  - `nspd.gov.ru`: DNS `2.63.246.71-76`, HTTP 200;
+  - `tyumen.domclick.ru` и `domclick.ru`: DNS `178.248.234.210`, HTTP 200;
+  - `avito.ru`: DNS `176.114.120.24/122.24/124.24`, HTTP 301 -> 429;
+  - `cian.ru`: DNS `51.250.123.126`, HTTP 302 -> 404 на корень.
+- Проверен публичный формат ГИС Торги: конкретный лот открывается по `https://torgi.gov.ru/new/public/lots/lot/{regNum}_{lotNumber}`, извещение отдельно по `https://torgi.gov.ru/new/public/notices/view/{regNum}`.
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): добавлен `torgi_lot_html_url`; `torgi_public_url` теперь предпочитает конкретную карточку лота и только затем fallback на извещение/JSON.
+- API [backend/app/schemas.py](backend/app/schemas.py), [backend/app/api.py](backend/app/api.py): добавлено поле `torgi_notice_url`; `torgi_url` теперь означает ссылку на конкретный лот.
+- Telegram [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): в блоке ссылок отдельно добавляются `ГИС Торги (лот)` и `ГИС Торги (извещение)`.
+- Frontend [frontend/src/types.ts](frontend/src/types.ts), [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx), [frontend/src/pages/LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx): таблица и карточка показывают отдельные ссылки на лот и извещение.
+- Обновлена документация по контракту ссылок: [AGENTS.md](AGENTS.md), [README.md](README.md), [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
+
+**Проверки:**
+- `python -m pytest tests/test_external_lot_links.py tests/test_api.py tests/test_alerts_service.py`: 41 passed.
+- `python -m pytest` в `backend`: 105 passed.
+- `npx.cmd tsc --noEmit` в `frontend`: прошло.
+- `GET http://localhost:8000/api/lots?limit=1&has_cadastral=true`: `torgi_url=https://torgi.gov.ru/new/public/lots/lot/21000030190000000072_2`, `torgi_notice_url=https://torgi.gov.ru/new/public/notices/view/21000030190000000072`.
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:5173`: HTTP 200.
+- `git diff --check`: без whitespace-ошибок, только стандартные CRLF-предупреждения Git на Windows.
+
+**TODO:**
+- Руками открыть несколько ссылок `torgi_url` из UI и убедиться, что SPA ГИС Торги выбирает нужный лот без дополнительного клика.
+
+---
+
+## 2026-05-10 - Clean reset dev-БД на текущем компьютере
+
+**Что сделано:**
+- `D:\Property_Auctions` на компьютере не найден; актуальная рабочая копия проекта была в `F:\Property_Auctions`, операции выполнены там.
+- Проверены `AGENTS.md`, свежий `WORKLOG.md`, `git status`, ветка `codex/gis_torgi_v2`, remote `https://github.com/Ki1aa/property-auctions.git`.
+- Выполнен `git pull origin cursor`: уже актуально на `1e19dd3 feat: harden MVP land lot monitoring`.
+- Порты `8000` и `5173` перед reset были свободны.
+- Текущая `data/app.db` сохранена в `data/backups/app-before-clean-reset-20260510-165815.db`, затем удалена только `data/app.db`.
+- Создана чистая SQLite-схема через `scripts/dev_sync_schema.py`. В этой рабочей копии нет `.venv312`, поэтому использован системный Python 3.12.
+- Выполнен live backfill за закрытое окно `2026-05-01` - `2026-05-09` с process-level переменными:
+  - `TELEGRAM_ALERTS_ENABLED=false`;
+  - `TARGET_REGION_CODES=72`;
+  - `INGEST_ONLY_LAND_LOTS=true`;
+  - `INGEST_DETAIL_MAX_PER_RUN=1000`.
+- Backfill завершился без падений: `fetched_count=8670`, `upserted_count=118`, `processed_files=10`, `failed_files=0`.
+- НСПД dry-run с `NSPD_VERIFY_TLS=false`: `5/5 matched`; затем применено обогащение `--region 72 --limit 0 --force --include-fresh --commit-every 10`: `selected=86`, `matched=80`, `failed=6`.
+- Backend и frontend подняты заново:
+  - backend: `http://localhost:8000`, process-level `TARGET_REGION_CODES=72`, `INGEST_ONLY_LAND_LOTS=true`, `NSPD_VERIFY_TLS=false`;
+  - frontend: `http://localhost:5173`.
+
+**Итоговые данные:**
+- `lots`: 115.
+- `opendata_notices`: 108.
+- `ingest_manifest`: 10.
+- `alert_events`: 0.
+- `lot_snapshots`: 118.
+- Все `lots.category=ZK`.
+- ИЖС-кандидатов: 68.
+- С кадастром: 86.
+- С НСПД-центроидом: 70.
+- С `nspd_card_id`: 80.
+- Явных маркеров non-land assets (`автомоб`, `древес`, `здани`, `помещен`, `транспорт`) в `lots` не найдено.
+- `/api/lots?limit=1&has_cadastral=true` вернул лот с `nspd_map_url` c `selectedCard` и `domclick_map_url`.
+
+**Проверки:**
+- `GET http://localhost:8000/health`: `{"status":"ok"}`.
+- `GET http://localhost:8000/api/ingest-status`: scheduler running, `target_region_codes="72"`.
+- `GET http://localhost:8000/api/lots/quality`: `total=115`, `izhs_candidates=68`, `with_cadastral=86`, `with_area=115`, `with_baseline=49`, `with_positive_discount=24`.
+- `GET http://localhost:8000/api/lots?limit=1&has_cadastral=true`: есть `nspd_map_url` и `domclick_map_url`.
+- `GET http://localhost:5173`: HTTP 200.
+- `python -m pytest` в `backend`: 104 passed.
+- `npx.cmd tsc --noEmit` в `frontend`: прошло.
+- Сетевой доступ:
+  - `torgi.gov.ru`: доступен, IP `95.167.245.141`;
+  - `nspd.gov.ru`: доступен, IP `2.63.246.71-76`;
+  - `domclick.ru` / `tyumen.domclick.ru`: DNS есть, но `curl` уходит в timeout, IP `178.248.234.210`;
+  - `avito.ru`: доступен до HTTP, отвечает `429`, IP `176.114.120.24`, `176.114.122.24`, `176.114.124.24`;
+  - `cian.ru`: доступен до HTTP, IP `51.250.123.126`.
+
+**TODO:**
+- Если Домклик нужен для ручной проверки карт, добавить `178.248.234.210` в VPN-bypass и повторить открытие `tyumen.domclick.ru`.
+- При необходимости создать локальную копию именно в `D:\Property_Auctions`; сейчас рабочий проект находится в `F:\Property_Auctions`.
+
+---
+
 ## 2026-05-10 - Домклик-карта района по bbox вокруг участка
 
 **Что сделано:**

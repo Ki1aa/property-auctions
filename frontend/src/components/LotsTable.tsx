@@ -42,7 +42,17 @@ function confidenceLabel(value: string | null): string {
   return "—";
 }
 
+function nspdStatusLabel(status: string | null | undefined): string {
+  if (status === "enriched") return "НСПД: данные";
+  if (status === "no_data") return "НСПД: пусто";
+  if (status === "none") return "НСПД: не проверялось";
+  return "НСПД: —";
+}
+
 function LotLinksCell({ lot }: { lot: Lot }) {
+  const avitoUrl = lot.avito_search_url_cadastral || lot.avito_search_url;
+  const cianUrl = lot.cian_search_url_cadastral || lot.cian_search_url;
+
   return (
     <div className="lots-table__links">
       <Link to={`/lots/${lot.id}`} className="button button--compact lots-table__open-link">
@@ -50,12 +60,27 @@ function LotLinksCell({ lot }: { lot: Lot }) {
       </Link>
       {lot.torgi_url ? (
         <a className="lots-table__ext-link" href={lot.torgi_url} target="_blank" rel="noreferrer">
-          ГИС
+          ГИС лот
+        </a>
+      ) : null}
+      {lot.torgi_notice_url ? (
+        <a className="lots-table__ext-link" href={lot.torgi_notice_url} target="_blank" rel="noreferrer">
+          Извещение
         </a>
       ) : null}
       {lot.domclick_map_url ? (
         <a className="lots-table__ext-link" href={lot.domclick_map_url} target="_blank" rel="noreferrer">
           Домклик
+        </a>
+      ) : null}
+      {avitoUrl ? (
+        <a className="lots-table__ext-link" href={avitoUrl} target="_blank" rel="noreferrer">
+          Авито
+        </a>
+      ) : null}
+      {cianUrl ? (
+        <a className="lots-table__ext-link" href={cianUrl} target="_blank" rel="noreferrer">
+          Циан
         </a>
       ) : null}
     </div>
@@ -105,6 +130,10 @@ export function LotsTable({ lots }: Props) {
                 <StatusBadge status={lot.status} />
                 <div className="lots-table__meta">Регион: {lot.region || "—"}</div>
                 <div className="lots-table__meta">{lot.municipality || lot.settlement || "—"}</div>
+                <div className="lots-table__meta">{nspdStatusLabel(lot.nspd_data_status)}</div>
+                <div className="lots-table__meta">
+                  Центроид: {lot.map_centroid_available ? "да" : "нет"}
+                </div>
               </td>
               <td className="cell--nowrap">{formatArea(lot.area_sqm)}</td>
               <td className="cell--num">

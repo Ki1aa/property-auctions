@@ -332,6 +332,9 @@ def test_ingest_status_and_manual_start_endpoint(monkeypatch):
     class DummyScheduler:
         running = True
 
+        def get_job(self, _job_id):
+            return None
+
     monkeypatch.setattr("app.api.ingest_scheduler.is_ingest_running", lambda: False)
     monkeypatch.setattr("app.api.ingest_scheduler.next_scheduled_ingest_at", lambda: None)
     monkeypatch.setattr("app.api.ingest_scheduler.start_manual_ingest", lambda mode="operational": True)
@@ -484,6 +487,7 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     from sqlalchemy import select
 
     monkeypatch.setattr("app.services.external_lot_links.settings.include_marketplace_search_urls", False)
+    monkeypatch.setattr("app.services.external_lot_links.settings.include_marketplace_quick_links", True)
     TestingSessionLocal = _setup_inmemory_app()
 
     db = TestingSessionLocal()
@@ -541,7 +545,8 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     assert body["notice_reg_num"] == "72000000000000000123"
     assert body["notice_lot_number"] == "2"
     assert body["notice_lot_count"] == 3
-    assert body["torgi_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
+    assert body["torgi_url"] == "https://torgi.gov.ru/new/public/lots/lot/72000000000000000123_2"
+    assert body["torgi_notice_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
     assert body["torgi_json_url"] == (
         "https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json"
     )
@@ -554,9 +559,43 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     assert body["domclick_search_url"] is None
     assert body["domclick_search_url_cadastral"] is None
     assert body["avito_search_url"] is None
-    assert body["avito_search_url_cadastral"] is None
+    assert body["avito_search_url_cadastral"] == (
+        "https://www.avito.ru/tyumen/zemelnye_uchastki?q=72%3A01%3A0000000%3A1"
+    )
     assert body["cian_search_url"] is None
-    assert body["cian_search_url_cadastral"] is None
+    assert body["cian_search_url_cadastral"] == (
+        "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/"
+        "?text=72%3A01%3A0000000%3A1"
+    )
+
+
+def test_lots_list_uses_stored_notice_identity_for_torgi_lot_url():
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="72000000000000000999",
+            title="Первый source_id, но не первый номер лота",
+            status="active",
+            region="72",
+            notice_reg_num="72000000000000000999",
+            notice_lot_number="7",
+            notice_lot_count=9,
+            source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_abc.json",
+        )
+    )
+    db.commit()
+    db.close()
+
+    client = TestClient(app)
+    body = client.get("/api/lots", params={"limit": 1}).json()
+    item = body["items"][0]
+
+    assert item["notice_reg_num"] == "72000000000000000999"
+    assert item["notice_lot_number"] == "7"
+    assert item["notice_lot_count"] == 9
+    assert item["torgi_url"] == "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
 
 
 def test_lot_detail_returns_null_notice_payload_when_not_linked():

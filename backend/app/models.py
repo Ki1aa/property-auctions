@@ -47,6 +47,9 @@ class Lot(Base):
     municipality: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     settlement: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
     notice_detail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notice_reg_num: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    notice_lot_number: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    notice_lot_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_izhs_candidate: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", index=True)
 
     # Link to the raw OpenDataNotice record (when the lot came from opendata).
@@ -134,6 +137,18 @@ class AlertEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     event_hash: Mapped[str] = mapped_column(String(64), index=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TelegramDigestItem(Base):
+    """Queued Telegram alert rows; flushed periodically when TELEGRAM_DIGEST_ENABLED=true."""
+
+    __tablename__ = "telegram_digest_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lot_id: Mapped[int] = mapped_column(ForeignKey("lots.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    event_hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class MarketComparable(Base):

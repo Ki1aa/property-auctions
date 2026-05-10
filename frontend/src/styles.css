@@ -1140,6 +1140,7 @@ tr:hover td {
   color: var(--text-muted);
   line-height: 1.4;
   border-top: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
 }
 
 .card__note {
@@ -1150,6 +1151,7 @@ tr:hover td {
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 /* Misc */
@@ -1318,5 +1320,20 @@ tr:hover td {
   }
   .lots-filters__actions {
     justify-content: flex-start;
+  }
+  .lot-summary {
+    grid-template-columns: 1fr;
+  }
+  .card {
+    padding: 8px 12px;
+  }
+  .card__row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .card__row > span:last-child {
+    width: 100%;
+    text-align: left;
   }
 }

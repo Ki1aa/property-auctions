@@ -160,9 +160,19 @@ export function LotDetailPage() {
         <div className="card">
           {lot.torgi_url ? (
             <div className="card__row">
-              <span className="card__label">Извещение ГИС Торги</span>
+              <span className="card__label">Лот ГИС Торги</span>
               <span>
                 <a href={lot.torgi_url} target="_blank" rel="noreferrer">
+                  Открыть лот
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.torgi_notice_url ? (
+            <div className="card__row">
+              <span className="card__label">Извещение ГИС Торги</span>
+              <span>
+                <a href={lot.torgi_notice_url} target="_blank" rel="noreferrer">
                   Открыть извещение
                 </a>
               </span>
@@ -177,7 +187,7 @@ export function LotDetailPage() {
                 </a>
               </span>
             </div>
-          ) : jsonNoticeHref && jsonNoticeHref !== lot.torgi_url ? (
+          ) : jsonNoticeHref && jsonNoticeHref !== lot.torgi_url && jsonNoticeHref !== lot.torgi_notice_url ? (
             <div className="card__row">
               <span className="card__label">JSON извещения</span>
               <span>
@@ -188,7 +198,7 @@ export function LotDetailPage() {
             </div>
           ) : null}
           <p className="card__note">
-            В ГИС Торгах публичная ссылка открывает извещение целиком. В нашем мониторе эта карточка соответствует конкретному внутреннему лоту:
+            Эта карточка соответствует конкретному лоту:
             {lot.notice_reg_num ? ` извещение ${lot.notice_reg_num}` : " извещение не определено"}
             {lot.notice_lot_number ? `, ${noticeLotLabel}` : ""}.
           </p>
@@ -327,6 +337,22 @@ export function LotDetailPage() {
           <span className="card__label">Основание baseline</span>
           <span>{lot.valuation_reason || "—"}</span>
         </div>
+        <div className="card__row">
+          <span className="card__label">Медиана объявлений (сотка)</span>
+          <span title={lot.market_valuation_reason ?? undefined}>{formatPrice(lot.market_baseline_price_per_sotka)}</span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Дисконт к рынку (объявления)</span>
+          <span className={lot.discount_to_market && lot.discount_to_market > 0 ? "cell--good" : ""}>
+            {formatPercent(lot.discount_to_market)}
+          </span>
+        </div>
+        <div className="card__row">
+          <span className="card__label">Investment score</span>
+          <span title="Эвристика по дисконту и сигналам; не инвестиционный совет">
+            {lot.investment_score !== null && lot.investment_score !== undefined ? String(lot.investment_score) : "—"}
+          </span>
+        </div>
         <div className="card__row"><span className="card__label">Дата начала</span><span>{formatDate(lot.start_date)}</span></div>
         <div className="card__row"><span className="card__label">Дата окончания</span><span>{formatDate(lot.end_date)}</span></div>
         <div className="card__row"><span className="card__label">Организатор</span><span>{lot.organizer_name || "—"}</span></div>
@@ -358,6 +384,22 @@ export function LotDetailPage() {
             <div className="card__row"><span className="card__label">ВРИ (вид разрешённого использования)</span><span>{lot.permitted_use || "—"}</span></div>
             <div className="card__row"><span className="card__label">Коды ВРИ</span><span>{lot.permitted_use_codes || "—"}</span></div>
             <div className="card__row"><span className="card__label">ИЖС-кандидат</span><span>{izhsReason(lot)}</span></div>
+            <div className="card__row">
+              <span className="card__label">НСПД (кратко)</span>
+              <span>
+                {lot.nspd_data_status === "enriched"
+                  ? "Данные в полях НСПД"
+                  : lot.nspd_data_status === "no_data"
+                    ? "Проверено, пусто"
+                    : lot.nspd_data_status === "none"
+                      ? "Не обогащалось"
+                      : "—"}
+              </span>
+            </div>
+            <div className="card__row">
+              <span className="card__label">Центроид для карты</span>
+              <span>{lot.map_centroid_available ? "Да (НСПД или извещение)" : "Нет"}</span>
+            </div>
             <div className="card__row"><span className="card__label">Адрес</span><span>{lot.address || "—"}</span></div>
           </div>
         </section>

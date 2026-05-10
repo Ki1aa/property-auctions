@@ -7,6 +7,7 @@ waiting for new Torgi files.
 Examples:
     python scripts/enrich_lots_nspd.py --limit 50 --force
     python scripts/enrich_lots_nspd.py --limit 10 --dry-run --force
+    python scripts/enrich_lots_nspd.py --only-missing --limit 100 --force
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -52,20 +55,39 @@ def _lot_sample(lot: Lot, features_count: int, error: str | None = None) -> dict
     }
 
 
+def _classify_failure(exc: BaseException) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "failed_timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "failed_http"
+    if isinstance(exc, httpx.RequestError):
+        msg = str(exc).lower()
+        if "ssl" in msg or "certificate" in msg or "tls" in msg:
+            return "failed_tls"
+        return "failed_transport"
+    return "failed_other"
+
+
 def enrich_existing_lots(
     *,
     limit: int,
     dry_run: bool,
     include_fresh: bool,
+    only_missing: bool,
     commit_every: int,
     region: str | None,
 ) -> dict[str, Any]:
-    counts = {
+    counts: dict[str, int] = {
         "selected": 0,
         "checked": 0,
         "matched": 0,
         "no_match": 0,
         "failed": 0,
+        "failed_timeout": 0,
+        "failed_tls": 0,
+        "failed_http": 0,
+        "failed_transport": 0,
+        "failed_other": 0,
         "skipped_fresh": 0,
     }
     samples: list[dict[str, Any]] = []
@@ -78,6 +100,8 @@ def enrich_existing_lots(
             .where(Lot.cadastral_number != "")
             .order_by(Lot.nspd_enriched_at.asc().nullsfirst(), Lot.id.asc())
         )
+        if only_missing:
+            stmt = stmt.where(Lot.nspd_enriched_at.is_(None))
         if region:
             stmt = stmt.where(Lot.region == region)
         if limit > 0:
@@ -96,6 +120,9 @@ def enrich_existing_lots(
                 features = fetch_nspd_features_sync(cad)
                 apply_nspd_features_to_lot(lot, features)
             except Exception as exc:
+                bucket = _classify_failure(exc)
+                if bucket in counts:
+                    counts[bucket] += 1
                 counts["failed"] += 1
                 if len(samples) < 25:
                     samples.append(_lot_sample(lot, 0, error=f"{type(exc).__name__}: {exc}"))
@@ -124,6 +151,7 @@ def enrich_existing_lots(
 
     return {
         "dry_run": dry_run,
+        "only_missing": only_missing,
         "region": region,
         "nspd_base_url": settings.nspd_base_url,
         "nspd_geoportal_search_path": settings.nspd_geoportal_search_path,
@@ -138,6 +166,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=50, help="0 = no limit")
     parser.add_argument("--dry-run", action="store_true", help="Fetch NSPD data but rollback DB writes")
     parser.add_argument("--include-fresh", action="store_true", help="Ignore NSPD_REFRESH_AFTER_DAYS cache")
+    parser.add_argument(
+        "--only-missing",
+        action="store_true",
+        help="Only lots that were never NSPD-enriched (nspd_enriched_at IS NULL)",
+    )
     parser.add_argument("--region", default="", help="Optional region code filter, e.g. 72")
     parser.add_argument("--force", action="store_true", help="Run even when NSPD_ENABLED=false in .env")
     parser.add_argument("--commit-every", type=int, default=10)
@@ -155,6 +188,7 @@ def main() -> None:
         limit=args.limit,
         dry_run=args.dry_run,
         include_fresh=args.include_fresh,
+        only_missing=args.only_missing,
         commit_every=args.commit_every,
         region=args.region.strip() or None,
     )
@@ -168,8 +202,15 @@ def main() -> None:
     print(f"- mode: {'dry-run' if args.dry_run else 'apply'}")
     if report["region"]:
         print(f"- region: {report['region']}")
+    if report.get("only_missing"):
+        print("- filter: only_missing (nspd_enriched_at IS NULL)")
     print(f"- selected={counts['selected']}, checked={counts['checked']}, skipped_fresh={counts['skipped_fresh']}")
     print(f"- matched={counts['matched']}, no_match={counts['no_match']}, failed={counts['failed']}")
+    print(
+        "- failures by kind: "
+        f"timeout={counts['failed_timeout']}, tls={counts['failed_tls']}, "
+        f"http={counts['failed_http']}, transport={counts['failed_transport']}, other={counts['failed_other']}"
+    )
     print(f"- output: {output_path}")
 
 

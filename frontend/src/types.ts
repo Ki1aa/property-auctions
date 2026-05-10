@@ -65,8 +65,19 @@ export type Lot = {
   valuation_baseline_scope: string | null;
   valuation_baseline_sample_size: number | null;
   valuation_reason: string | null;
+  /** NSPD: none | enriched | no_data */
+  nspd_data_status: string | null;
+  map_centroid_available: boolean;
+  /** Median from imported comparables; optional. */
+  market_baseline_price_per_sotka: number | null;
+  discount_to_market: number | null;
+  market_valuation_reason: string | null;
+  investment_score: number | null;
   app_lot_url: string | null;
+  /** Concrete GIS Torgi lot page. */
   torgi_url: string | null;
+  /** GIS Torgi notice page. */
+  torgi_notice_url: string | null;
   /** Raw notice JSON href when it differs from the HTML notice page. */
   torgi_json_url: string | null;
   /** NSPD public map entry point; cadastral number is shown separately for search. */
@@ -145,6 +156,9 @@ export type IngestStatus = {
   fetch_notice_details: boolean;
   detail_max_per_run: number;
   target_region_codes: string;
+  telegram_digest_enabled: boolean;
+  telegram_digest_interval_minutes: number;
+  telegram_digest_next_at: string | null;
 };
 
 export type ManualIngestStartResponse = {
@@ -175,4 +189,6 @@ export type LotQualityMetrics = {
   with_price_per_sotka: number;
   with_baseline: number;
   with_positive_discount: number;
+  with_nspd_enriched: number;
+  with_map_centroid: number;
 };

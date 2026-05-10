@@ -28,6 +28,11 @@ class LotValuation:
     valuation_baseline_scope: str | None = None
     valuation_baseline_sample_size: int | None = None
     valuation_reason: str | None = None
+    # From MarketComparable medians; not filled until comparables are imported.
+    market_baseline_price_per_sotka: float | None = None
+    discount_to_market: float | None = None
+    market_valuation_reason: str | None = None
+    investment_score: float | None = None
 
 
 def derived_prices(start_price: float | None, area_sqm: float | None) -> tuple[float | None, float | None]:

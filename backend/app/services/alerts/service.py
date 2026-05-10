@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import AlertEvent, Lot, LotSnapshot, OpenDataNotice
+from app.models import AlertEvent, Lot, LotSnapshot, OpenDataNotice, TelegramDigestItem
 from app.services.alerts.telegram import send_telegram_message
 from app.services.external_lot_links import (
     app_public_lot_url,
@@ -22,7 +22,9 @@ from app.services.external_lot_links import (
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
 )
-from app.services.lot_baseline import LotValuation, derived_prices
+from app.services.lot_baseline import LotValuation, derived_prices, load_baseline_index, lot_valuation
+from app.services.market_median import load_market_median_stats, valuation_with_market
+from app.services.lot_identity import lot_notice_identity
 
 
 def _esc_html_text(value: object) -> str:
@@ -138,37 +140,8 @@ def _alert_verdict(lot: Lot, valuation: LotValuation) -> tuple[str, list[str]]:
 
 
 def _notice_identity(lot: Lot, latest_payload: dict[str, Any] | None) -> tuple[str | None, str | None, int | None]:
-    source_id = (lot.source_id or "").strip()
-    notice_reg_num: str | None = None
-    lot_number: str | None = None
-    lot_count: int | None = None
-
-    if ":lot:" in source_id:
-        notice_reg_num, lot_number = source_id.split(":lot:", 1)
-    elif source_id.isdigit():
-        notice_reg_num = source_id
-
-    if latest_payload:
-        raw_count = latest_payload.get("_notice_lot_count")
-        if isinstance(raw_count, int) and raw_count > 0:
-            lot_count = raw_count
-        elif isinstance(raw_count, str) and raw_count.isdigit():
-            lot_count = int(raw_count)
-
-        raw_lot = latest_payload.get("_notice_lot")
-        if isinstance(raw_lot, dict):
-            raw_number = raw_lot.get("lotNumber")
-            if raw_number is not None and str(raw_number).strip():
-                lot_number = str(raw_number).strip()
-
-        raw_index = latest_payload.get("_notice_lot_index")
-        if lot_number is None and isinstance(raw_index, int):
-            lot_number = str(raw_index + 1)
-
-    if lot_count and lot_count > 1 and lot_number is None:
-        lot_number = "1"
-
-    return notice_reg_num, lot_number, lot_count
+    identity = lot_notice_identity(lot, latest_payload)
+    return identity.reg_num, identity.lot_number, identity.lot_count
 
 
 def _notice_line(lot: Lot, latest_payload: dict[str, Any] | None) -> str:
@@ -196,9 +169,32 @@ def _valuation_line(valuation: LotValuation) -> str:
         pieces.append(f"baseline {_format_money(valuation.baseline_price_per_sotka)}/сотка")
     if valuation.discount_to_baseline is not None:
         pieces.append(f"дисконт {_format_percent(valuation.discount_to_baseline)}")
+    if valuation.market_baseline_price_per_sotka is not None:
+        pieces.append(f"рынок {_format_money(valuation.market_baseline_price_per_sotka)}/сотка")
+    if valuation.discount_to_market is not None:
+        pieces.append(f"дисконт к рынку {_format_percent(valuation.discount_to_market)}")
+    if valuation.investment_score is not None:
+        pieces.append(f"score {valuation.investment_score}")
     if valuation.valuation_confidence:
         pieces.append(f"уверенность {valuation.valuation_confidence}")
     return _compact_join(pieces, " | ")
+
+
+def _why_interesting_text(lot: Lot, valuation: LotValuation, start_price_per_sotka: float | None) -> str:
+    parts: list[str] = []
+    if lot.is_izhs_candidate:
+        parts.append("ИЖС-кандидат")
+    if (lot.cadastral_number or "").strip():
+        parts.append("есть кадастр")
+    if start_price_per_sotka is not None:
+        parts.append(f"цена {_format_money(start_price_per_sotka)}/сотка")
+    if valuation.discount_to_baseline is not None and valuation.discount_to_baseline > 0:
+        parts.append(f"ниже внутр. baseline на {_format_percent(valuation.discount_to_baseline)}")
+    if valuation.discount_to_market is not None and valuation.discount_to_market > 0:
+        parts.append(f"ниже медианы объявлений на {_format_percent(valuation.discount_to_market)}")
+    if valuation.investment_score is not None:
+        parts.append(f"investment_score≈{valuation.investment_score}")
+    return "; ".join(parts)
 
 
 def _is_low_signal_alert(lot: Lot, valuation: LotValuation, start_price_per_sotka: float | None) -> bool:
@@ -220,6 +216,26 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
         return
 
     event_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    baseline_index = load_baseline_index(db)
+    market_stats = load_market_median_stats(db)
+    valuation = valuation_with_market(lot, lot_valuation(lot, baseline_index), market_stats)
+    start_price_per_sotka, start_price_per_sqm = derived_prices(lot.start_price, lot.area_sqm)
+    if settings.telegram_alert_skip_low_signal and _is_low_signal_alert(lot, valuation, start_price_per_sotka):
+        return
+
+    if settings.telegram_alert_require_discount_or_per_sotka:
+        if valuation.discount_to_baseline is None and start_price_per_sotka is None:
+            return
+
+    min_disc = settings.telegram_alert_min_discount_to_baseline
+    if min_disc is not None:
+        if valuation.discount_to_baseline is None:
+            if settings.telegram_alert_require_baseline_for_discount:
+                return
+        elif valuation.discount_to_baseline < min_disc:
+            return
+
     exists = db.scalar(
         select(AlertEvent).where(
             AlertEvent.lot_id == lot.id,
@@ -230,20 +246,19 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     if exists:
         return
 
-    from app.services.lot_baseline import load_baseline_index, lot_valuation
-
-    valuation = lot_valuation(lot, load_baseline_index(db))
-    start_price_per_sotka, start_price_per_sqm = derived_prices(lot.start_price, lot.area_sqm)
-    if settings.telegram_alert_skip_low_signal and _is_low_signal_alert(lot, valuation, start_price_per_sotka):
-        return
-
-    min_disc = settings.telegram_alert_min_discount_to_baseline
-    if min_disc is not None:
-        if valuation.discount_to_baseline is None:
-            if settings.telegram_alert_require_baseline_for_discount:
-                return
-        elif valuation.discount_to_baseline < min_disc:
+    if settings.telegram_digest_enabled:
+        dup = db.scalar(
+            select(TelegramDigestItem.id).where(
+                TelegramDigestItem.lot_id == lot.id,
+                TelegramDigestItem.event_type == event_type,
+                TelegramDigestItem.event_hash == event_hash,
+            )
+        )
+        if dup:
             return
+        db.add(TelegramDigestItem(lot_id=lot.id, event_type=event_type, event_hash=event_hash))
+        db.commit()
+        return
 
     notice_payload: dict[str, Any] | None = None
     if lot.opendata_notice_id is not None:
@@ -255,8 +270,9 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     )
     latest_payload = latest_snapshot.payload if latest_snapshot is not None and isinstance(latest_snapshot.payload, dict) else None
 
-    t_url = torgi_public_url(lot, notice_payload)
-    t_json = torgi_notice_json_link_when_distinct(lot, notice_payload)
+    t_url = torgi_public_url(lot, notice_payload, latest_payload)
+    t_notice_url = torgi_notice_html_url(lot, notice_payload)
+    t_json = torgi_notice_json_link_when_distinct(lot, notice_payload, latest_payload)
     nspd_u = nspd_lot_map_url(lot)
     app_u = app_public_lot_url(lot.id)
     dom_map = domclick_land_map_url(lot)
@@ -296,6 +312,10 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
         f"Заявки: {_esc_html_text(_format_datetime(lot.start_date))} - {_esc_html_text(_format_datetime(lot.end_date))}",
         f"Сигналы: {_esc_html_text('; '.join(verdict_reasons))}",
     ]
+    why = _why_interesting_text(lot, valuation, start_price_per_sotka)
+    if why:
+        lines.append("")
+        lines.append(f"<b>Почему интересно:</b> {_esc_html_text(why)}")
     if valuation.valuation_reason and valuation.valuation_reason not in verdict_reasons:
         lines.append(f"Пояснение baseline: {_esc_html_text(valuation.valuation_reason)}")
     if lot.address:
@@ -305,10 +325,13 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     link_parts: list[str] = []
     seen_urls: set[str] = set()
     _append_unique_link(link_parts, seen_urls, app_u, "Монитор")
-    torgi_primary_label = "ГИС Торги (страница)" if torgi_notice_html_url(lot, notice_payload) else "ГИС Торги"
-    _append_unique_link(link_parts, seen_urls, t_url, torgi_primary_label)
+    _append_unique_link(link_parts, seen_urls, t_url, "ГИС Торги (лот)")
+    _append_unique_link(link_parts, seen_urls, t_notice_url, "ГИС Торги (извещение)")
     _append_unique_link(link_parts, seen_urls, nspd_u, "НСПД карта")
     _append_unique_link(link_parts, seen_urls, dom_map, "Домклик (карта района)")
+    if settings.include_marketplace_quick_links and lot.cadastral_number:
+        _append_unique_link(link_parts, seen_urls, avi_cad, "Авито (кадастр)")
+        _append_unique_link(link_parts, seen_urls, cian_cad, "Циан (кадастр)")
     if settings.include_marketplace_search_urls:
         if lot.cadastral_number:
             _append_unique_link(link_parts, seen_urls, dom_cad, "Домклик (поиск, кадастр)")
@@ -322,7 +345,7 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     lines.append(" | ".join(link_parts) if link_parts else "—")
     lines.append("")
     lines.append("<i>Baseline считается по уже загруженным торгам, это ещё не рыночная оценка Циан.</i>")
-    if settings.include_marketplace_search_urls:
+    if settings.include_marketplace_quick_links or settings.include_marketplace_search_urls:
         lines.append(
             "<i>Площадки: шаблонный поиск по кадастру/адресу; не гарантирует карточку участка.</i>"
         )
@@ -340,3 +363,53 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
         disable_web_page_preview=settings.telegram_disable_web_page_preview,
     )
     db.add(AlertEvent(lot_id=lot.id, event_type=event_type, event_hash=event_hash))
+
+
+async def flush_telegram_digest(db: Session) -> None:
+    if not settings.telegram_alerts_enabled or not settings.telegram_digest_enabled:
+        return
+    if not (settings.telegram_bot_token or "").strip() or not (settings.telegram_chat_id or "").strip():
+        return
+
+    rows = list(db.scalars(select(TelegramDigestItem).order_by(TelegramDigestItem.id)).all())
+    if not rows:
+        return
+
+    baseline_index = load_baseline_index(db)
+    market_stats = load_market_median_stats(db)
+    parts: list[str] = [
+        "<b>Дайджест лотов</b>",
+        f"<i>Событий: {len(rows)}</i>",
+        "",
+    ]
+    for item in rows:
+        row_lot = db.get(Lot, item.lot_id)
+        if not row_lot:
+            continue
+        valuation = valuation_with_market(row_lot, lot_valuation(row_lot, baseline_index), market_stats)
+        per_sotka, _ = derived_prices(row_lot.start_price, row_lot.area_sqm)
+        why = _why_interesting_text(row_lot, valuation, per_sotka)
+        label = _event_label(item.event_type)
+        parts.append(
+            f"<b>{_esc_html_text(label)}</b> · id {row_lot.id}<br/>"
+            f"{_esc_html_text(row_lot.title)}<br/>"
+            f"<i>{_esc_html_text(why or '—')}</i>"
+        )
+        parts.append("")
+
+    body = "\n".join(parts).strip()
+    max_len = max(500, settings.telegram_max_message_length - 64)
+    if len(body) > max_len:
+        body = body[:max_len] + "\n<i>…обрезано</i>"
+
+    await send_telegram_message(
+        settings.telegram_bot_token,
+        settings.telegram_chat_id,
+        body,
+        parse_mode="HTML",
+        disable_web_page_preview=settings.telegram_disable_web_page_preview,
+    )
+    for item in rows:
+        db.add(AlertEvent(lot_id=item.lot_id, event_type=item.event_type, event_hash=item.event_hash))
+        db.delete(item)
+    db.commit()

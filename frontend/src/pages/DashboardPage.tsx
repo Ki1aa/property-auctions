@@ -44,6 +44,8 @@ function qualityItems(quality: LotQualityMetrics | null) {
     ["Можно считать ₽/сотка", quality.with_price_per_sotka],
     ["Есть baseline", quality.with_baseline],
     ["Положительный дисконт", quality.with_positive_discount],
+    ["НСПД: данные найдены", quality.with_nspd_enriched],
+    ["Есть центроид для карты", quality.with_map_centroid],
   ] as const;
 }
 

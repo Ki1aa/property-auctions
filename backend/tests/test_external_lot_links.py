@@ -95,25 +95,54 @@ def test_torgi_notice_html_prefers_official_detail_href():
     )
 
 
-def test_torgi_public_prefers_regnum_html_over_json():
+def test_torgi_lot_html_defaults_to_first_lot_for_single_lot_notice():
     lot = _lot(
         source_id="72000000000000000999",
         source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
         notice_detail_url=None,
     )
     assert links.torgi_public_url(lot, None) == (
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_1"
+    )
+    assert links.torgi_notice_html_url(lot, None) == (
         "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
     )
 
 
-def test_torgi_public_uses_notice_regnum_from_multilot_source_id():
+def test_torgi_public_uses_concrete_lot_from_multilot_source_id():
     lot = _lot(
         source_id="72000000000000000999:lot:4",
         source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
         notice_detail_url=None,
     )
     assert links.torgi_public_url(lot, None) == (
-        "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_4"
+    )
+
+
+def test_torgi_public_uses_lot_number_from_snapshot_payload():
+    lot = _lot(
+        source_id="72000000000000000999",
+        source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        notice_detail_url=None,
+    )
+    payload = {"_notice_lot": {"lotNumber": "7"}}
+    assert links.torgi_public_url(lot, None, payload) == (
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
+    )
+
+
+def test_torgi_public_uses_stored_notice_identity_without_snapshot_payload():
+    lot = _lot(
+        source_id="72000000000000000999",
+        source_url="https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000999_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json",
+        notice_detail_url=None,
+        notice_reg_num="72000000000000000999",
+        notice_lot_number="7",
+        notice_lot_count=9,
+    )
+    assert links.torgi_public_url(lot, None) == (
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
     )
 
 
@@ -134,7 +163,7 @@ def test_domclick_and_avito_use_query_from_lot(monkeypatch):
     d = links.domclick_land_search_url(lot)
     a = links.avito_search_url(lot)
     assert d is not None and "domclick.ru" in d and "query=" in d
-    assert a is not None and "avito.ru" in a and "q=" in a
+    assert a is not None and "avito.ru/tyumen/zemelnye_uchastki" in a and "q=" in a
 
 
 def test_domclick_map_url_uses_nspd_centroid(monkeypatch):
@@ -178,9 +207,13 @@ def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
 
 def test_marketplace_disabled(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
+    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", False)
     lot = _lot(cadastral_number="72:01:1:1", region="72")
     assert links.domclick_land_search_url(lot) is None
     assert links.avito_search_url(lot) is None
+    assert links.avito_search_url_cadastral_only(lot) is None
+    assert links.cian_land_search_url(lot) is None
+    assert links.cian_land_search_url_cadastral_only(lot) is None
 
 
 def test_torgi_json_link_when_distinct_requires_html_and_differs():
@@ -210,15 +243,51 @@ def test_cadastral_only_search_urls(monkeypatch):
     a = links.avito_search_url_cadastral_only(lot)
     c = links.cian_land_search_url_cadastral_only(lot)
     assert d is not None and "domclick.ru" in d
-    assert a is not None and "avito.ru" in a
-    assert c is not None and "cian.ru" in c
+    assert a is not None and "avito.ru/tyumen/zemelnye_uchastki" in a
+    assert c is not None and "tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast" in c
     assert "Тестовая" not in (d or "")
     assert "Тестовая" not in (a or "")
     assert "Тестовая" not in (c or "")
 
 
+def test_regional_quick_links_moscow(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
+    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", True)
+    lot = _lot(cadastral_number="77:01:1:1", region="77")
+    avito = links.avito_search_url_cadastral_only(lot)
+    cian = links.cian_land_search_url_cadastral_only(lot)
+    assert avito is not None and "avito.ru/moskva/zemelnye_uchastki" in avito
+    assert cian is not None and "cian.ru/kupit-zemelniy-uchastok-moskva" in cian
+
+
 def test_cian_disabled_when_template_empty(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", True)
     monkeypatch.setattr(links.settings, "cian_land_search_template", "")
-    lot = _lot(cadastral_number="72:01:1:1", region="72")
+    lot = _lot(cadastral_number="99:01:1:1", region="99")
     assert links.cian_land_search_url(lot) is None
+
+
+def test_marketplace_quick_links_work_without_full_search(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
+    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", True)
+    lot = _lot(
+        source_id="72000000000000000123",
+        cadastral_number="72:01:1:1",
+        address="ул. Тестовая",
+        municipality="Тюмень",
+        region="72",
+    )
+
+    assert links.domclick_land_search_url(lot) is None
+    assert links.domclick_land_search_url_cadastral_only(lot) is None
+    assert links.avito_search_url(lot) is None
+    assert links.cian_land_search_url(lot) is None
+
+    avito = links.avito_search_url_cadastral_only(lot)
+    cian = links.cian_land_search_url_cadastral_only(lot)
+
+    assert avito == "https://www.avito.ru/tyumen/zemelnye_uchastki?q=72%3A01%3A1%3A1"
+    assert cian == (
+        "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/"
+        "?text=72%3A01%3A1%3A1"
+    )

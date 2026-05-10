@@ -173,6 +173,16 @@ export function IngestRunsPage() {
           <span className="ingest-status__label">Detail JSON</span>
           <strong>{status?.fetch_notice_details ? `включён, до ${status.detail_max_per_run}` : "выключен"}</strong>
         </div>
+        <div>
+          <span className="ingest-status__label">Telegram digest</span>
+          <strong>
+            {status?.telegram_digest_enabled
+              ? `вкл, каждые ${status.telegram_digest_interval_minutes} мин; следующий: ${
+                  status.telegram_digest_next_at ? formatDate(status.telegram_digest_next_at) : "—"
+                }`
+              : "выкл"}
+          </strong>
+        </div>
       </section>
 
       <p className="help-text">

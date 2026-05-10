@@ -31,6 +31,7 @@ from app.database import SessionLocal
 from app.models import AlertEvent, IngestManifest, IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
 from app.services.ingest.detail_parser import match_izhs, parse_notice_detail, split_keywords
 from app.services.ingest.normalizer import normalize_lot
+from app.services.lot_identity import notice_identity_from_values
 from app.config import settings
 from scripts.dev_sync_schema import sync as sync_dev_schema
 
@@ -252,6 +253,13 @@ def load_demo_data(*, union_path: Path, detail_dir: Path, reset: bool, target_re
             lot.municipality = normalized.get("municipality")
             lot.settlement = normalized.get("settlement")
             lot.notice_detail_url = normalized.get("notice_detail_url")
+            identity = notice_identity_from_values(
+                source_id=normalized.get("source_id"),
+                notice_payload=notice.payload if notice and isinstance(notice.payload, dict) else None,
+            )
+            lot.notice_reg_num = identity.reg_num
+            lot.notice_lot_number = identity.lot_number
+            lot.notice_lot_count = identity.lot_count
             lot.is_izhs_candidate = bool(normalized.get("is_izhs_candidate"))
             lot.opendata_notice_id = notice.id if notice else None
 

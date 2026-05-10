@@ -28,6 +28,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import Lot, OpenDataNotice
+from app.services.lot_identity import lot_notice_identity
 
 
 DEFAULT_REPORT_PATH = Path(__file__).resolve().parents[2] / "data" / "raw" / "link_lots_to_notices_report.json"
@@ -63,13 +64,15 @@ def main() -> None:
 
         href_index: dict[str, int] = {}
         reg_index: dict[str, int] = {}
-        for notice_id, href, reg_num in db.execute(
-            select(OpenDataNotice.id, OpenDataNotice.href, OpenDataNotice.reg_num)
+        notice_payload_index: dict[int, dict[str, Any] | None] = {}
+        for notice_id, href, reg_num, payload in db.execute(
+            select(OpenDataNotice.id, OpenDataNotice.href, OpenDataNotice.reg_num, OpenDataNotice.payload)
         ):
             if href:
                 href_index[href] = notice_id
             if reg_num:
                 reg_index.setdefault(reg_num, notice_id)
+            notice_payload_index[notice_id] = payload if isinstance(payload, dict) else None
 
         for lot in all_lots:
             if lot.opendata_notice_id is not None:
@@ -108,6 +111,10 @@ def main() -> None:
 
             if not args.dry_run:
                 lot.opendata_notice_id = notice_id
+                identity = lot_notice_identity(lot, notice_payload=notice_payload_index.get(notice_id))
+                lot.notice_reg_num = identity.reg_num
+                lot.notice_lot_number = identity.lot_number
+                lot.notice_lot_count = identity.lot_count
 
         if not args.dry_run:
             db.commit()

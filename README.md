@@ -8,9 +8,9 @@
 
 Сейчас проект работает в dev-режиме на локальной SQLite:
 
-- схема создается автоматически при старте backend через `Base.metadata.create_all(...)`;
+- для **SQLite** схема дополняется автоматически при старте через `Base.metadata.create_all(...)` (только если `DATABASE_URL` указывает на sqlite);
 - по умолчанию используется `DATABASE_URL=sqlite+pysqlite:///../data/app.db`;
-- миграции Alembic сохраняются в проекте и будут использоваться при переходе к production;
+- миграции Alembic — основной путь для **PostgreSQL** и для CI; для Docker backend выполняет `alembic upgrade head` перед `uvicorn`;
 - для существующей SQLite после изменения моделей запускайте `cd backend && python scripts/dev_sync_schema.py`: скрипт добавляет новые колонки и недостающие индексы; внешние ключи SQLite не умеет добавлять без rebuild таблицы, поэтому скрипт выводит предупреждение.
 
 ## Быстрый старт (dev)
@@ -85,7 +85,31 @@ cd backend
 python scripts/run_backfill_ingest.py --from-date 2026-04-01 --to-date 2026-04-10
 ```
 
+Окно «до вчера включительно» без сегодняшнего дня:
+
+```bash
+cd backend
+python scripts/run_backfill_closed_window.py --days 7
+```
+
 Логи загрузок и идемпотентность фиксируются в таблице `ingest_manifest` (`source_url + sha256` не обрабатывается повторно).
+
+## Проверка доступности внешних хостов
+
+Для диагностики маршрута и подсказок WireSock (DNS → IP):
+
+```bash
+cd backend
+python scripts/check_external_hosts.py
+```
+
+## Docker Compose (PostgreSQL + backend + frontend)
+
+В корне [docker-compose.yml](docker-compose.yml) три сервиса. Задайте в `.env` строку подключения к Postgres внутри сети compose, например `DATABASE_URL=postgresql+psycopg://gis_user:gis_password@db:5432/gis_torgi`, и переменные `POSTGRES_*` как в [.env.example](.env.example). Образ backend перед стартом прогоняет `alembic upgrade head`.
+
+## Резервное копирование БД (production)
+
+Рекомендуемый минимум для PostgreSQL: ночной `pg_dump` (логический дамп) в зашифрованное хранилище, хранение нескольких поколений (например 7–30 дней), периодическая проверка восстановления на тестовый инстанс. Для SQLite dev достаточно копировать файл `data/app.db` перед экспериментами.
 
 ## План по миграциям (к production)
 
@@ -93,7 +117,7 @@ python scripts/run_backfill_ingest.py --from-date 2026-04-01 --to-date 2026-04-1
 
 - переключить `DATABASE_URL` на PostgreSQL;
 - применять изменения схемы через Alembic (`alembic revision`, `alembic upgrade head`);
-- отключить автосоздание схемы через `create_all` в runtime.
+- `create_all` при старте выполняется **только** для SQLite; на Postgres схема должна соответствовать последней ревизии Alembic.
 
 Создать новую миграцию:
 
@@ -116,9 +140,9 @@ alembic current
 ## Основные эндпоинты
 
 - `GET /health` - проверка доступности.
-- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка), `nspd_map_url` при наличии кадастра. Если НСПД-обогащение нашло `card_id/card_type` и центроид, URL ведёт прямо в карточку участка через `selectedCard`; иначе открывает карту с кадастром в query и, при наличии центроида, с нужным zoom/координатами. `domclick_map_url` появляется при наличии координат/НСПД-центроида и ведёт на карту Домклик вокруг участка (`offer_type=lot`, bbox `sw/ne`, радиус `MARKETPLACE_MAP_RADIUS_KM`).
+- `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `notice_reg_num`, `notice_lot_number`, `notice_lot_count` для стабильной привязки multi-lot извещений, `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка), `nspd_map_url` при наличии кадастра. Если НСПД-обогащение нашло `card_id/card_type` и центроид, URL ведёт прямо в карточку участка через `selectedCard`; иначе открывает карту с кадастром в query и, при наличии центроида, с нужным zoom/координатами. `domclick_map_url` появляется при наличии координат/НСПД-центроида и ведёт на карту Домклик вокруг участка (`offer_type=lot`, bbox `sw/ne`, радиус `MARKETPLACE_MAP_RADIUS_KM`). `avito_search_url_cadastral` и `cian_search_url_cadastral` включены по умолчанию через `INCLUDE_MARKETPLACE_QUICK_LINKS=true`; это быстрые ручные поиски по кадастру, не автоматическая оценка.
 - `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами, `sort` и baseline-колонками, параметр `max_rows` (по умолчанию 10000, макс. 50000).
-- `GET /api/lots/quality?region=72` - метрики качества данных для Dashboard: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline.
+- `GET /api/lots/quality?region=72` - метрики качества данных для Dashboard: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline, НСПД с данными, центроид для карты.
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
 - `GET /api/ingest-runs` - история запусков загрузчика с диагностикой файлов: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`.
@@ -128,7 +152,7 @@ alembic current
 
 ## Telegram-алерты
 
-После ingest при событиях `new_lot` / `changed_lot` backend может отправить компактную карточку в Telegram: вердикт, причина попадания, `regNum + lotNumber`, кадастр, земля, цена за сотку, baseline и ссылки на монитор, публичную карточку ГИС Торги `/new/public/notices/view/{regNum}`, НСПД-карту/deep link, карту Домклик вокруг участка при наличии координат и сырой JSON извещения. Текстовый поиск на Домклик/Авито/Циан опционален через `INCLUDE_MARKETPLACE_SEARCH_URLS=true`; в MVP он выключен по умолчанию, потому что площадки могут открывать капчу или пустую выдачу.
+После ingest при событиях `new_lot` / `changed_lot` backend может отправить компактную карточку в Telegram: вердикт, причина попадания, `regNum + lotNumber`, кадастр, земля, цена за сотку, baseline и ссылки на монитор, конкретный лот ГИС Торги `/new/public/lots/lot/{regNum}_{lotNumber}`, отдельное извещение `/new/public/notices/view/{regNum}`, НСПД-карту/deep link, карту Домклик вокруг участка при наличии координат, быстрые поиски Авито/Циан по кадастру и сырой JSON извещения. Расширенный текстовый поиск на Домклик/Авито/Циан опционален через `INCLUDE_MARKETPLACE_SEARCH_URLS=true`; в MVP он выключен по умолчанию, потому что площадки могут открывать капчу или пустую выдачу.
 
 1. Создайте бота в [@BotFather](https://t.me/BotFather), получите `TELEGRAM_BOT_TOKEN`.
 2. Узнайте `TELEGRAM_CHAT_ID`: для личного чата напишите боту `/start`, затем используйте [@userinfobot](https://t.me/userinfobot) или `getUpdates` у Bot API; для канала добавьте бота администратором, id обычно вида `-100...`.
@@ -159,7 +183,9 @@ cd backend
 python scripts/enrich_lots_nspd.py --region 72 --limit 50 --force
 ```
 
-`--force` нужен для ручного запуска, если в `.env` оставлено `NSPD_ENABLED=false`. Для безопасной проверки без записи в БД используйте `--dry-run`. Скрипт пишет отчёт в `data/raw/nspd_enrich_report.json`.
+`--force` нужен для ручного запуска, если в `.env` оставлено `NSPD_ENABLED=false`. Для безопасной проверки без записи в БД используйте `--dry-run`. Флаг `--only-missing` ограничивает выборку лотами без `nspd_enriched_at`. Скрипт пишет отчёт в `data/raw/nspd_enrich_report.json` с разбивкой `matched` / `no_match` / ошибок по типу (timeout, TLS, HTTP).
+
+Импорт ручных аналогов для рыночной медианы (таблица `market_comparables`): `python scripts/import_market_comparables_json.py --file path/to/array.json`.
 
 Если при split tunneling НСПД открывается, но Python падает с `CERTIFICATE_VERIFY_FAILED` / self-signed chain, для локального dev можно временно задать `NSPD_VERIFY_TLS=false`. В production оставляйте `true`.
 

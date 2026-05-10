@@ -608,6 +608,9 @@ def test_run_ingest_splits_multilot_notice_detail(monkeypatch):
         "72000000000000000123:lot:2",
     ]
     assert [lot.title for lot in lots] == ["Участок 1", "Участок 2"]
+    assert [lot.notice_reg_num for lot in lots] == ["72000000000000000123", "72000000000000000123"]
+    assert [lot.notice_lot_number for lot in lots] == ["1", "2"]
+    assert [lot.notice_lot_count for lot in lots] == [2, 2]
     assert [lot.cadastral_number for lot in lots] == ["72:01:0000001:1", "72:01:0000001:2"]
     assert [lot.area_sqm for lot in lots] == [600.0, 900.0]
     assert all(lot.opendata_notice_id is not None for lot in lots)

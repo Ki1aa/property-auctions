@@ -36,9 +36,21 @@ class LotListItem(BaseModel):
     valuation_baseline_scope: str | None = None
     valuation_baseline_sample_size: int | None = None
     valuation_reason: str | None = None
-    # Deep links (see external_lot_links); marketplace URLs are off by default and best-effort search.
+    # NSPD enrichment: none = never fetched; enriched = got card/area/cost/address; no_data = fetch OK but empty.
+    nspd_data_status: str | None = None
+    # True when NSPD or notice lat/lon can anchor map links.
+    map_centroid_available: bool = False
+    # Median ₽/sotka from imported MarketComparable rows (separate from auction baseline).
+    market_baseline_price_per_sotka: float | None = None
+    discount_to_market: float | None = None
+    market_valuation_reason: str | None = None
+    investment_score: float | None = None
+    # Deep links (see external_lot_links); marketplace URLs are best-effort manual search.
     app_lot_url: str | None = None
+    # Concrete GIS Torgi lot page when notice and lot numbers are known.
     torgi_url: str | None = None
+    # GIS Torgi notice page; separate from the concrete lot link.
+    torgi_notice_url: str | None = None
     torgi_json_url: str | None = None
     # NSPD public map entry point; cadastral number is shown separately to paste/search there.
     nspd_map_url: str | None = None
@@ -119,6 +131,9 @@ class IngestStatusView(BaseModel):
     fetch_notice_details: bool
     detail_max_per_run: int
     target_region_codes: str
+    telegram_digest_enabled: bool = False
+    telegram_digest_interval_minutes: int = 30
+    telegram_digest_next_at: datetime | None = None
 
 
 class ManualIngestStartResponse(BaseModel):
@@ -165,3 +180,5 @@ class LotQualityMetrics(BaseModel):
     with_price_per_sotka: int
     with_baseline: int
     with_positive_discount: int
+    with_nspd_enriched: int = 0
+    with_map_centroid: int = 0
