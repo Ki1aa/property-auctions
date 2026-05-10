@@ -10,6 +10,9 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         return None
 
+    def json(self) -> dict:
+        return {"ok": True, "result": {"message_id": 1}}
+
 
 def test_send_telegram_uses_proxy_and_timeout(monkeypatch):
     instances: list[object] = []

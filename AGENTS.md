@@ -95,6 +95,8 @@ backend/
     dev_sync_schema.py              # dev-only: ALTER TABLE + недостающие индексы для существующей SQLite; FK только предупреждением
     send_telegram_test.py           # smoke: одно тестовое сообщение по TELEGRAM_* из .env
     send_telegram_demo_alert.py     # демо-карточка лота: in-memory БД + реальный notify_lot_event
+    ingest_torgi.py                 # MVP GIS ingest в mvp_gis_*: --dry-run --limit N
+    backup_mvp_db.py                # копия SQLite data/app.db в data/backups/ перед сменой схемы
   tests/                            # pytest (api, ingest client/discovery/service/upsert, normalizer, detail_parser, retry, notice-link)
   requirements.txt
   alembic.ini

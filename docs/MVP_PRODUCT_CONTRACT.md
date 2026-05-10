@@ -84,6 +84,10 @@ MVP - это не полноценная платформа оценки нед�
 - гарантированную карточку того же участка на агрегаторах;
 - investment_score как production-сигнал.
 
+## MVP GIS parallel ingest (`mvp_gis_*`)
+
+Параллельный backend-путь (ветка `codex/gis_torgi_v3_pro`): таблицы `mvp_gis_notices`, `mvp_gis_lots`, `mvp_gis_lot_versions`, `mvp_gis_telegram_events` не заменяют legacy `lots`. Ingest: `python scripts/ingest_torgi.py [--dry-run] [--limit N]`; перед сменой схемы SQLite: `python scripts/backup_mvp_db.py`. Stage-1 земля по `INGEST_LAND_FILTER_BIDD_TYPE_CODES` (после разбора полей в [GIS_TORGI_FIELD_RESEARCH.md](GIS_TORGI_FIELD_RESEARCH.md)); пустой конфиг без `INGEST_LAND_FILTER_RELAXED=true` блокирует запись. `content_hash` только по бизнес-полям; Telegram для `mvp_gis_lots` — только `region_code=72` и `signal_level >= TELEGRAM_MIN_SIGNAL_LEVEL` (по умолчанию HIGH). НСПД в алертах: URL с `query=` по кадастру без UI-автоматизации. Read-only API: `GET /api/mvp/stats`, `GET /api/mvp/lots`.
+
 ## Ближайший порядок работ
 
 1. Подобрать production-настройки Telegram-фильтров на живом потоке: ИЖС, кадастр, минимальный дисконт, strict baseline при достаточной базе.

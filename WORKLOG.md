@@ -6,6 +6,22 @@
 
 ---
 
+## 2026-05-11 - Очистка SQLite и повторная загрузка
+
+**Что сделано:** Резервная копия `data/app.db` в `data/backups/app_20260511_033234.db` (скрипт `backup_mvp_db.py` пропустил копирование из-за не-SQLite `DATABASE_URL` в окружении агента — использован ручной `Copy-Item`). Удалён `data/app.db`, пересоздана схема через `Base.metadata.create_all` (включая `mvp_gis_*`). Запущен legacy `run_ingest`: частично успешно (`upserted_count` 63, один файл failed — SSL `CERTIFICATE_VERIFY_FAILED` и/или ответ Торгов о недоступном срезе). `ingest_torgi.py` без записей в `.env` для `INGEST_LAND_FILTER_BIDD_TYPE_CODES` требует переменную; с override `ZK` discovery вернул ошибку по отсутствующему `data-...structure-...json` (срез ещё не опубликован).
+
+**Нужно вручную:** в корневом `.env` задать `INGEST_LAND_FILTER_BIDD_TYPE_CODES=ZK` (или `INGEST_LAND_FILTER_RELAXED=true` только для отладки); при SSL через прокси — настроить доверие/маршрут к `torgi.gov.ru`; повторить ingest позже или `python scripts/ingest_torgi.py --dry-run --limit 50` после появления среза.
+
+---
+
+## 2026-05-12 - MVP GIS: таблицы mvp_gis_*, ingest_torgi, классификация и Telegram
+
+**Что сделано:** Параллельная схема ORM [`backend/app/models_mvp.py`](backend/app/models_mvp.py) (`mvp_gis_notices`, `mvp_gis_lots`, `mvp_gis_lot_versions`, `mvp_gis_telegram_events`) без замены legacy `lots`. Конфиг: `INGEST_LAND_FILTER_BIDD_TYPE_CODES`, `INGEST_LAND_FILTER_RELAXED`, `TELEGRAM_MIN_SIGNAL_LEVEL`, `TELEGRAM_PENDING_STALE_MINUTES` в [`backend/app/config.py`](backend/app/config.py), [`.env.example`](.env.example). Сервисы: [`backend/app/services/mvp/`](backend/app/services/mvp/) — `link_builder`, `content_hash` (11 бизнес-полей), `classify` (signal HIGH/MEDIUM/LOW/NONE, blacklist с исключением ЗУ+кадастр), `pipeline.run_mvp_ingest`, `mvp_telegram`. Скрипты: [`backend/scripts/ingest_torgi.py`](backend/scripts/ingest_torgi.py), [`backend/scripts/backup_mvp_db.py`](backend/scripts/backup_mvp_db.py). Alembic: [`backend/alembic/versions/20260512_16_mvp_gis_tables.py`](backend/alembic/versions/20260512_16_mvp_gis_tables.py). API: [`backend/app/mvp_api.py`](backend/app/mvp_api.py) (`/api/mvp/stats`, `/api/mvp/lots`). Регистрация таблиц в [`backend/app/main.py`](backend/app/main.py). `send_telegram_message` возвращает `message_id`. Документация: [`docs/GIS_TORGI_FIELD_RESEARCH.md`](docs/GIS_TORGI_FIELD_RESEARCH.md), правка [`docs/MVP_PRODUCT_CONTRACT.md`](docs/MVP_PRODUCT_CONTRACT.md), [AGENTS.md](AGENTS.md). Тесты: [`backend/tests/test_mvp_gis.py`](backend/tests/test_mvp_gis.py).
+
+**Проверки:** `pytest` — 140 passed.
+
+---
+
 ## 2026-05-12 - Git: `main` на GitHub выровнен под `codex/gis_torgi_v2`
 
 **Что сделано:** Локально `main` сброшен на тот же коммит, что рабочая ветка (`git reset --hard codex/gis_torgi_v2`), на GitHub выполнен `git push origin main --force-with-lease` (`579cb90` → `481c345`). Конфликтный merge `main` + `codex/gis_torgi_v2` отменён: единый источник правды — состояние ветки разработки.

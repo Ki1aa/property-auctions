@@ -19,9 +19,9 @@ async def send_telegram_message(
     max_retries: int | None = None,
     proxy_url: str | None = None,
     timeout_seconds: float | None = None,
-) -> None:
+) -> int | None:
     if not bot_token or not chat_id:
-        return
+        return None
 
     cap = max_length if max_length is not None else settings.telegram_max_message_length
     if cap > 0 and len(text) > cap:
@@ -57,4 +57,10 @@ async def send_telegram_message(
                 await asyncio.sleep(wait_s)
                 continue
             response.raise_for_status()
-            return
+            data = response.json()
+            if isinstance(data, dict) and data.get("ok") and isinstance(data.get("result"), dict):
+                mid = data["result"].get("message_id")
+                if mid is not None:
+                    return int(mid)
+            return None
+    return None

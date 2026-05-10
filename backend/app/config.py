@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     # Set false in production to avoid heavy work on process start.
     run_ingest_on_startup: bool = False
 
+    # --- MVP GIS (mvp_gis_* tables, scripts/ingest_torgi.py) ---
+    # Comma-separated biddTypeCode values treated as land for stage-1 filter (e.g. ZK).
+    # Empty with ingest_land_filter_relaxed=false: production ingest refuses to start.
+    ingest_land_filter_bidd_type_codes: str = ""
+    # Dev/debug only: allow ingest without land-filter config (no stage-1 code filter).
+    ingest_land_filter_relaxed: bool = False
+    # Telegram: NONE < LOW < MEDIUM < HIGH; default HIGH for MVP.
+    telegram_min_signal_level: str = "HIGH"
+    # Retry stale pending telegram_events rows older than this many minutes.
+    telegram_pending_stale_minutes: int = 120
+
     @field_validator("telegram_alert_min_discount_to_baseline", mode="before")
     @classmethod
     def _empty_discount_to_none(cls, v: object) -> object:

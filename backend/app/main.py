@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, update
 
 from app.api import router as api_router
+from app.mvp_api import router as mvp_api_router
 from app.config import settings
 from app.database import Base, SessionLocal, engine
+from app import models_mvp  # noqa: F401  — register MVP GIS tables on Base.metadata
 from app.models import IngestRun
 from app.schemas import HealthResponse
 from app.scheduler import scheduled_ingest, start_scheduler, stop_scheduler
@@ -81,6 +83,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router)
+app.include_router(mvp_api_router)
 
 
 @app.get("/health", response_model=HealthResponse)
