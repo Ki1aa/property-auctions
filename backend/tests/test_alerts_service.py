@@ -86,10 +86,11 @@ def test_notify_lot_event_sends_html_with_links(monkeypatch, db_session):
     assert "https://app.example/lots/" in sent["text"]
     assert "torgi.gov.ru" in sent["text"]
     assert "nspd.gov.ru/map" in sent["text"]
-    assert "НСПД (ФГИС ЕГРН)" in sent["text"]
+    assert "ПКК (НСПД)" in sent["text"]
     assert "https://nspd.gov.ru/map?thematic=PKK" in sent["text"]
     assert "query=72:01:1:1" in sent["text"]
-    assert "Домклик" in sent["text"]
+    assert "Домклик (карта)" in sent["text"]
+    assert "Домклик (поиск, кадастр)" in sent["text"]
     assert "offer_type=lot" in sent["text"]
     assert "Оповещения Telegram настроены только на Тюменскую область (регион 72)." in sent["text"]
     assert sent["kwargs"].get("disable_web_page_preview") is True

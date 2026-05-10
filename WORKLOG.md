@@ -6,6 +6,120 @@
 
 ---
 
+## 2026-05-12 - Лот vs извещение: заголовок строки и ingest title
+
+**Что сделано:** `lot_preferred_list_title` перед fallback на `lots.title` отдаёт `Лот {N} · {regNum}` (и для мультилота без кадастра то же вместо голого «Лот N»). OpenData-ветка `normalize_lot`: в `title` не пишется `noticeName` — приоритет `lots[].lotName`/name, иначе `Лот 1 · {regNum}`. Detail multi-lot без `lotName`: `Лот {N} · {regNum}` вместо склейки с прежним `normalized['title']`. Экспорт CSV и `/api/lots-map` используют preferred title (CSV с batch последних snapshot). Тесты: `test_lot_identity`, `test_normalizer_notices`.
+
+**Файлы:** `backend/app/services/lot_identity.py`, `backend/app/services/ingest/normalizer.py`, `backend/app/services/ingest/service.py`, `backend/app/api.py`, тесты.
+
+**Проверки:** `pytest` — 132 passed.
+
+---
+
+## 2026-05-12 - ПКК на карточке лота: live resolve через геопортал
+
+**Что сделано:** Модуль [`backend/app/services/nspd/resolve_pkk_link.py`](backend/app/services/nspd/resolve_pkk_link.py): при `GET /api/lots/{id}` при `NSPD_ENABLED` и `NSPD_RESOLVE_PKK_LINK_ON_DETAIL` (default true) один запрос `fetch_nspd_features_sync` по кадастру, выбор feature, сборка URL с `selectedCard`; иначе прежний `nspd_lot_map_url`. In-memory TTL-кэш по кадастру 1 ч. Настройка в [`config.py`](backend/app/config.py), [`.env.example`](.env.example). Тесты в [`test_api.py`](backend/tests/test_api.py). Документация: [README.md](README.md), [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
+
+**Проверки:** `pytest` — 129 passed.
+
+---
+
+## 2026-05-12 - Dev SQLite: dev_sync_schema + backfill lot_notice_attributes
+
+**Что сделано:** На локальной БД выполнены `python backend/scripts/dev_sync_schema.py` и `python backend/scripts/backfill_lot_notice_attributes.py` (3987 лотов). `pytest` — 126 passed.
+
+---
+
+## 2026-05-12 - API/UI: канон координат и характеристики лота в карточке
+
+**Что сделано:** `GET /api/lots/{id}` отдаёт `notice_attributes` (из `lot_notice_attributes`) и `map_anchor_*`. `map_centroid_available` и `/api/lots-map` учитывают якорь и тот же приоритет, что `lot_map_display_coordinates`. Домклик on-map и ПКК/НСПД deep link по лоту используют `lot_map_display_coordinates` вместо дублирующей логики. На `LotDetailPage` — таблица характеристик ГИС и подсказка по источнику якоря; мини-карта берёт `map_anchor` первым. Тесты API для атрибутов, якоря и точки только с `map_anchor`.
+
+**Файлы:** `backend/app/api.py`, `backend/app/services/external_lot_links.py`, `backend/tests/test_api.py`, `frontend/src/pages/LotDetailPage.tsx`, `AGENTS.md`.
+
+**Проверки:** `pytest` (126), `npx tsc --noEmit`, `npm run test -- --run`.
+
+---
+
+## 2026-05-11 - UI: один пункт «Домклик» (карта, иначе поиск по кадастру)
+
+**Что сделано:** В `LotExternalLinks` одна ссылка «Домклик»: `domclick_map_url ?? domclick_search_url_cadastral`; подсказка зависит от режима. Убраны отдельные строки поиск/карта/расширенный поиск. На `LotDetailPage` сноска про Домклик обновлена под одну ссылку.
+
+**Файлы:** `frontend/src/components/LotExternalLinks.tsx`, `frontend/src/pages/LotDetailPage.tsx`.
+
+**Проверки:** `npx tsc --noEmit`, `npm run test -- --run` — ok.
+
+---
+
+## 2026-05-11 - UI: убрана ссылка «JSON извещения» из блока ссылок лота
+
+**Что сделано:** В `LotExternalLinks` (таблица `/lots` и блок «Ссылки» на `/lots/:id`) удалена строка со ссылкой на JSON извещения; поле `jsonFallbackHref` убрано.
+
+**Файлы:** `frontend/src/components/LotExternalLinks.tsx`, `frontend/src/pages/LotDetailPage.tsx`.
+
+**Проверки:** `npx tsc --noEmit` — ok.
+
+---
+
+## 2026-05-11 - Домклик on-map: региональный host, точные sw/ne, координаты лота
+
+**Что сделано:** `domclick_land_map_url` строит ссылку вида `{base}?deal_type=sale&category=living&offer_type=lot&sw=lat,lon&ne=...&offset=0` с высокой точностью координат; база задаётся `DOMCLICK_ON_MAP_BASE_URL` (по умолчанию `https://domclick.ru/search/on-map`, можно региональный поддомен). Опционально `DOMCLICK_ON_MAP_AIDS`. Координаты по-прежнему: `nspd_centroid_*`, иначе `latitude`/`longitude` из лота.
+
+**Файлы:** `backend/app/config.py`, `external_lot_links.py`, `.env.example`, `test_external_lot_links.py`.
+
+**Проверки:** `pytest` — ok.
+
+---
+
+## 2026-05-11 - Ссылки на лотах: колонка, ПКК, Домклик
+
+**Что сделано:** Таблица `/lots`: колонка «Ссылки», вертикальный список — Карточка (внутренняя), Лот (ГИС Торги), Извещение, JSON при наличии, ПКК, при отличии от ПКК — НСПД (карточка), Домклик: поиск (кадастр, по умолчанию включён отдельным флагом), Домклик: карта (объявления рядом), расширенный поиск при флаге. Карточка лота: тот же компонент `LotExternalLinks`, при `APP_PUBLIC_BASE_URL` — «Карточка в мониторе». API: `pkk_map_url` = `pkk_lot_map_url(lot)` (как `nspd_lot_map_url`: зум/центр/`selectedCard` при обогащении). Настройка `DOMCLICK_CADASTRAL_SEARCH_ENABLED` (default true). Telegram: те же подписи ссылок, ПКК без дубля НСПД при совпадении URL.
+
+**Затронутые файлы:** `backend/app/config.py`, `external_lot_links.py`, `api.py`, `alerts/service.py`, `.env.example`, тесты; `frontend` — `LotExternalLinks.tsx`, `LotsTable.tsx`, `LotDetailPage.tsx`, `styles.css`.
+
+**Проверки:** `pytest` — 122 passed; `npx tsc --noEmit`, `npm run test -- --run` — ok.
+
+---
+
+## 2026-05-11 - API/UI: заголовок строки «Лот» — про лот, не извещение
+
+**Что сделано:** Поле `title` в ответах `/api/lots` и в базовой части `/api/lots/{id}` считается через `lot_preferred_list_title`: приоритет `lotName` / `lotDescription` из последнего `LotSnapshot` (`_notice_lot`), для мультилотов без имени — `Лот {n}` и кадастр, для однолотовых с кадастром — кадастр вместо названия извещения, иначе прежний `lots.title`. Список лотов подгружает последний snapshot пакетно (`max(id)` по `lot_id`).
+
+**Затронутые файлы:** `backend/app/services/lot_identity.py`, `backend/app/api.py`, тесты `test_lot_identity.py`, `test_api.py`.
+
+**Проверки:** `python -m pytest -q` в `backend` — 120 passed.
+
+---
+
+## 2026-05-11 - UI: убран столбец «Baseline» в таблице лотов
+
+**Что сделано:** На странице `/lots` в `LotsTable` удалены колонка Baseline (₽/сотка и дисконт); карточка лота и Dashboard не менялись.
+
+**Затронутые файлы:** `frontend/src/components/LotsTable.tsx`, `frontend/src/styles.css`.
+
+**Проверки:** `npx tsc --noEmit` в `frontend` — ok.
+
+---
+
+## 2026-05-11 - ГИС Торги: `torgi_url` с маршрутом `/(lotInfo:info)`
+
+**Что сделано:** Публичная ссылка на карточку лота (`torgi_lot_html_url` / `torgi_public_url`) дополнена суффиксом `/(lotInfo:info)`, как в официальной SPA (пример: `.../lot/21000023470000000037_1/(lotInfo:info)`), чтобы открывалась вкладка сведений о лоте.
+
+**Затронутые файлы:** `backend/app/services/external_lot_links.py`, тесты `test_external_lot_links.py`, `test_api.py`; документация `docs/MVP_PRODUCT_CONTRACT.md`, `AGENTS.md`, `README.md`, `DEVELOPMENT_PLAN.md`.
+
+**Проверки:** `python -m pytest tests/test_external_lot_links.py tests/test_api.py -q` — 35 passed.
+
+---
+
+## 2026-05-10 - UI: убран столбец «Уверенность» в таблице лотов
+
+**Что сделано:** На странице `/lots` в `LotsTable` удалены колонка и стили «Уверенность» (baseline `valuation_confidence`); на карточке лота (`/lots/:id`) блок не трогался.
+
+**Затронутые файлы:** `frontend/src/components/LotsTable.tsx`, `frontend/src/styles.css`.
+
+**Проверки:** `npx tsc --noEmit` в `frontend` — ok.
+
+---
+
 ## 2026-05-10 - MVP-подготовка: все регионы в UI, Telegram только 72
 
 **Что сделано:** Разделены область загрузки/интерфейса и область Telegram-оповещений. Добавлена настройка `TELEGRAM_ALERT_REGION_CODES` (default `72`): база и интерфейс могут работать по всем регионам при пустом `TARGET_REGION_CODES`, а Telegram отправляет только разрешённые регионы. В Telegram-сообщения и digest добавлено примечание о фильтре Тюменской области; `changed_lot` теперь отправляется только при изменении цены (`start_price` / `current_price`), а не при любом изменении snapshot. Ошибки отправки Telegram больше не валят ingest.

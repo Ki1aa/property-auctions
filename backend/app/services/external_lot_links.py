@@ -8,10 +8,12 @@ from urllib.parse import quote, urlencode
 from app.config import settings
 from app.models import Lot
 from app.services.lot_identity import lot_notice_identity
+from app.services.map_anchor import lot_map_display_coordinates
 from app.services.nspd.geometry import wgs84_to_epsg3857
 
 TORGI_NOTICE_VIEW = "https://torgi.gov.ru/new/public/notices/view/{notice_number}"
-TORGI_LOT_VIEW = "https://torgi.gov.ru/new/public/lots/lot/{lot_code}"
+# SPA route: opens the lot info tab (same as links from the notice page).
+TORGI_LOT_VIEW = "https://torgi.gov.ru/new/public/lots/lot/{lot_code}/(lotInfo:info)"
 NSPD_PUBLIC_MAP_URL = "https://nspd.gov.ru/map?thematic=PKK"
 NSPD_MAP_BASE_PARAMS = {
     "thematic": "PKK",
@@ -168,11 +170,18 @@ def pkk_map_url(cadastral_number: str | None) -> str | None:
     return rosreestr_cadastral_map_url(cadastral_number)
 
 
+def pkk_lot_map_url(lot: Lot) -> str | None:
+    """PKK on NSPD: same deep link as :func:`nspd_lot_map_url` (zoom / selectedCard when enrichment exists)."""
+    return nspd_lot_map_url(lot)
+
+
 def nspd_lot_map_url(lot: Lot) -> str | None:
+    coords = lot_map_display_coordinates(lot)
+    lat, lon = coords if coords else (None, None)
     return nspd_map_url(
         lot.cadastral_number,
-        centroid_latitude=lot.nspd_centroid_latitude,
-        centroid_longitude=lot.nspd_centroid_longitude,
+        centroid_latitude=lat,
+        centroid_longitude=lon,
         card_id=lot.nspd_card_id,
         card_type=lot.nspd_card_type,
     )
@@ -221,23 +230,6 @@ def _marketplace_url_from_template(
     return t.format(q=enc)
 
 
-def _valid_lat_lon(latitude: float | None, longitude: float | None) -> tuple[float, float] | None:
-    if latitude is None or longitude is None:
-        return None
-    lat = float(latitude)
-    lon = float(longitude)
-    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        return None
-    return lat, lon
-
-
-def _lot_marketplace_centroid(lot: Lot) -> tuple[float, float] | None:
-    return _valid_lat_lon(
-        lot.nspd_centroid_latitude,
-        lot.nspd_centroid_longitude,
-    ) or _valid_lat_lon(lot.latitude, lot.longitude)
-
-
 def _bbox_around_wgs84(latitude: float, longitude: float, radius_km: float) -> tuple[float, float, float, float]:
     radius = max(float(radius_km or 0), 0.1)
     lat_delta = radius / 111.32
@@ -254,24 +246,38 @@ def _fmt_coord(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
 
 
+def _fmt_coord_bbox(value: float) -> str:
+    """High-precision WGS84 for Domclick sw= / ne= (matches regional on-map links)."""
+    s = f"{float(value):.14f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
+
 def domclick_land_map_url(lot: Lot) -> str | None:
-    """Best-effort Domclick map search around lot coordinates; useful for manual analog lookup."""
+    """On-map search around lot centroid: canonical map anchor (NSPD polygon vs notice); bbox in sw/ne."""
     if not settings.include_marketplace_map_urls:
         return None
-    centroid = _lot_marketplace_centroid(lot)
+    centroid = lot_map_display_coordinates(lot)
     if centroid is None:
         return None
     lat, lon = centroid
     south, west, north, east = _bbox_around_wgs84(lat, lon, settings.marketplace_map_radius_km)
-    params = {
+    params: dict[str, str] = {
         "deal_type": "sale",
         "category": "living",
         "offer_type": "lot",
-        "sw": f"{_fmt_coord(south)},{_fmt_coord(west)}",
-        "ne": f"{_fmt_coord(north)},{_fmt_coord(east)}",
+        "sw": f"{_fmt_coord_bbox(south)},{_fmt_coord_bbox(west)}",
+        "ne": f"{_fmt_coord_bbox(north)},{_fmt_coord_bbox(east)}",
         "offset": "0",
     }
-    return "https://domclick.ru/search/on-map?" + urlencode(params, safe=",")
+    aids = (settings.domclick_on_map_aids or "").strip()
+    if aids:
+        params["aids"] = aids
+    base = (settings.domclick_on_map_base_url or "").strip().rstrip("/")
+    if not base:
+        base = "https://domclick.ru/search/on-map"
+    return f"{base}?" + urlencode(params, safe=",")
 
 
 def domclick_land_search_url(lot: Lot) -> str | None:
@@ -282,6 +288,10 @@ def domclick_land_search_url(lot: Lot) -> str | None:
 
 
 def domclick_land_search_url_cadastral_only(lot: Lot) -> str | None:
+    if not settings.domclick_cadastral_search_enabled:
+        return None
     return _marketplace_url_from_template(
-        settings.domclick_search_template, _marketplace_search_query_cadastral_only(lot)
+        settings.domclick_search_template,
+        _marketplace_search_query_cadastral_only(lot),
+        enabled=True,
     )

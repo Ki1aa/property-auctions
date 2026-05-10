@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Lot } from "../types";
+import { LotExternalLinks } from "./LotExternalLinks";
 import { StatusBadge } from "./StatusBadge";
 
 type Props = {
@@ -30,76 +31,11 @@ function formatDateTime(value: string | null): string {
   });
 }
 
-function formatPercent(value: number | null): string {
-  if (value === null || value === undefined) return "—";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function confidenceLabel(value: string | null): string {
-  if (value === "high") return "Высокая";
-  if (value === "medium") return "Средняя";
-  if (value === "low") return "Низкая";
-  return "—";
-}
-
 function nspdStatusLabel(status: string | null | undefined): string {
   if (status === "enriched") return "НСПД: данные";
   if (status === "no_data") return "НСПД: пусто";
   if (status === "none") return "НСПД: не проверялось";
   return "НСПД: —";
-}
-
-function LotLinksCell({ lot }: { lot: Lot }) {
-  return (
-    <div className="lots-table__links">
-      <Link to={`/lots/${lot.id}`} className="button button--compact lots-table__open-link">
-        Открыть
-      </Link>
-      {lot.torgi_url ? (
-        <a className="lots-table__ext-link" href={lot.torgi_url} target="_blank" rel="noreferrer">
-          ГИС лот
-        </a>
-      ) : null}
-      {lot.torgi_notice_url ? (
-        <a className="lots-table__ext-link" href={lot.torgi_notice_url} target="_blank" rel="noreferrer">
-          Извещение
-        </a>
-      ) : null}
-      {lot.pkk_map_url ? (
-        <a
-          className="lots-table__ext-link"
-          href={lot.pkk_map_url}
-          target="_blank"
-          rel="noreferrer"
-          title="Публичная кадастровая карта (НСПД), поиск по кадастру"
-        >
-          ПКК
-        </a>
-      ) : null}
-      {lot.nspd_map_url && lot.nspd_map_url !== lot.pkk_map_url ? (
-        <a
-          className="lots-table__ext-link"
-          href={lot.nspd_map_url}
-          target="_blank"
-          rel="noreferrer"
-          title="Карта НСПД: участок / центроид при обогащении"
-        >
-          НСПД
-        </a>
-      ) : null}
-      {lot.domclick_map_url ? (
-        <a
-          className="lots-table__ext-link"
-          href={lot.domclick_map_url}
-          target="_blank"
-          rel="noreferrer"
-          title="Домклик: карта объявлений об участках в округе"
-        >
-          Домклик
-        </a>
-      ) : null}
-    </div>
-  );
 }
 
 export function LotsTable({ lots }: Props) {
@@ -114,18 +50,12 @@ export function LotsTable({ lots }: Props) {
           <th className="lots-table__status-col">Статус / регион</th>
           <th className="lots-table__area-col">Площадь</th>
           <th className="lots-table__price-col">Цена</th>
-          <th className="lots-table__baseline-col">Baseline</th>
-          <th className="lots-table__confidence-col">Уверенность</th>
           <th className="lots-table__date-col">Даты торгов</th>
-          <th className="lots-table__links-col">Действие</th>
+          <th className="lots-table__links-col">Ссылки</th>
         </tr>
       </thead>
       <tbody>
         {lots.map((lot) => {
-          const discountClass =
-            lot.discount_to_baseline && lot.discount_to_baseline > 0
-              ? "lots-table__subvalue lots-table__discount lots-table__discount--good"
-              : "lots-table__subvalue lots-table__discount";
           return (
             <tr key={lot.id}>
               <td className="lots-table__lot-cell">
@@ -160,16 +90,6 @@ export function LotsTable({ lots }: Props) {
                   {formatPrice(lot.start_price_per_sotka)} / сотка
                 </div>
               </td>
-              <td className="cell--num">
-                <div className="lots-table__value">{formatPrice(lot.baseline_price_per_sotka)}</div>
-                <div
-                  className={discountClass}
-                  title="Положительное значение означает цену ниже внутреннего baseline"
-                >
-                  {formatPercent(lot.discount_to_baseline)}
-                </div>
-              </td>
-              <td title={lot.valuation_reason ?? undefined}>{confidenceLabel(lot.valuation_confidence)}</td>
               <td className="cell--nowrap lots-table__dates-cell">
                 <div className="lots-table__meta" title="Дата и время начала приёма заявок (если указаны в данных)">
                   Начало: {formatDateTime(lot.start_date)}
@@ -179,7 +99,7 @@ export function LotsTable({ lots }: Props) {
                 </div>
               </td>
               <td className="lots-table__links-cell">
-                <LotLinksCell lot={lot} />
+                <LotExternalLinks lot={lot} showInternalCardLink />
               </td>
             </tr>
           );

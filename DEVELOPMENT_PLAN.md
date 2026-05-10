@@ -8,7 +8,7 @@
 
 **Цель:** рабочий Telegram-first монитор, который при появлении или изменении участка быстро показывает полезную карточку: конкретный внутренний лот из извещения, кадастр, площадь, ВРИ, цену за сотку, baseline/дисконт, ссылки на монитор, ГИС Торги, НСПД-карту и поиски на рыночных площадках.
 
-Актуальный контракт вынесен в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md). Для ГИС Торги backend отдаёт две публичные ссылки: конкретный лот `/new/public/lots/lot/{regNum}_{lotNumber}` и отдельное извещение `/new/public/notices/view/{regNum}`; наш монитор всё равно показывает `regNum + lotNumber`, чтобы пользователь видел привязку к исходному извещению.
+Актуальный контракт вынесен в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md). Для ГИС Торги backend отдаёт две публичные ссылки: конкретный лот `/new/public/lots/lot/{regNum}_{lotNumber}/(lotInfo:info)` и отдельное извещение `/new/public/notices/view/{regNum}`; наш монитор всё равно показывает `regNum + lotNumber`, чтобы пользователь видел привязку к исходному извещению.
 
 **Выполнено 2026-05-10:**
 - Стабильная идентичность multi-lot извещений вынесена в поля `lots.notice_reg_num`, `lots.notice_lot_number`, `lots.notice_lot_count`. Список `/api/lots` теперь строит `torgi_url` из сохранённого номера лота и не зависит от подмешивания latest snapshot payload.

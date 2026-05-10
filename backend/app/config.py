@@ -69,9 +69,15 @@ class Settings(BaseSettings):
     app_public_base_url: str = ""
     # Best-effort Domclick text search from cadastral/address; off by default (captcha/empty results possible).
     include_marketplace_search_urls: bool = False
+    # Cadastral-only Domclick search link in API/UI (does not require include_marketplace_search_urls).
+    domclick_cadastral_search_enabled: bool = True
     # Map links around a known lot centroid; useful for manual analog inspection and does not scrape aggregators.
     include_marketplace_map_urls: bool = True
     marketplace_map_radius_km: float = 5.0
+    # Domclick on-map URL without query string; use regional host e.g. https://tyumen.domclick.ru/search/on-map
+    domclick_on_map_base_url: str = "https://domclick.ru/search/on-map"
+    # Optional Domclick map filter (region/catalog id), e.g. 1026 — only if required for your subdomain.
+    domclick_on_map_aids: str = ""
     # Domclick listing search template; `{q}` is replaced with URL-encoded query (see external_lot_links).
     domclick_search_template: str = "https://domclick.ru/search?query={q}"
 
@@ -88,6 +94,8 @@ class Settings(BaseSettings):
     nspd_max_per_run: int = 100
     # Skip new NSPD fetch if last enrichment is newer than this many days.
     nspd_refresh_after_days: int = 14
+    # Lot detail only: one geoportal search to build PKK URL with selectedCard when DB has no card.
+    nspd_resolve_pkk_link_on_detail: bool = True
     # How to merge NSPD area into Lot.area_sqm (notice detail remains primary by default).
     nspd_merge_area_policy: NspdFieldMergePolicy = "notice_only"
     # How to merge NSPD readable address into Lot.address.

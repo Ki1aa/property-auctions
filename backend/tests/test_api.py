@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
+from app.models import IngestRun, Lot, LotNoticeAttribute, LotSnapshot, OpenDataNotice, Organizer
 
 
 def _setup_inmemory_app():
@@ -560,7 +560,9 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     assert body["notice_reg_num"] == "72000000000000000123"
     assert body["notice_lot_number"] == "2"
     assert body["notice_lot_count"] == 3
-    assert body["torgi_url"] == "https://torgi.gov.ru/new/public/lots/lot/72000000000000000123_2"
+    assert body["torgi_url"] == (
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000123_2/(lotInfo:info)"
+    )
     assert body["torgi_notice_url"] == "https://torgi.gov.ru/new/public/notices/view/72000000000000000123"
     assert body["torgi_json_url"] == (
         "https://torgi.gov.ru/new/opendata/7710568760-notice/notice_72000000000000000123_702bf5e5-c1fe-43d9-b713-b52e485c6eea.json"
@@ -575,7 +577,94 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     )
     assert body["domclick_map_url"] is None
     assert body["domclick_search_url"] is None
-    assert body["domclick_search_url_cadastral"] is None
+    assert body["domclick_search_url_cadastral"] == "https://domclick.ru/search?query=72%3A01%3A0000000%3A1"
+    assert body["title"] == "Лот 2: 72:01:0000000:1"
+    assert body["notice_attributes"] == []
+    assert body["map_anchor_latitude"] is None
+    assert body["map_anchor_longitude"] is None
+    assert body["map_anchor_source"] is None
+
+
+def test_lot_detail_includes_notice_attributes_and_map_anchor():
+    from sqlalchemy import select
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    lot = Lot(
+        source_id="lot-attrs",
+        title="С атрибутами",
+        status="active",
+        region="72",
+        latitude=57.0,
+        longitude=65.0,
+    )
+    db.add(lot)
+    db.flush()
+    db.add(
+        LotNoticeAttribute(
+            lot_id=lot.id,
+            code="CadastralNumber",
+            value_text="72:01:0000000:99",
+            value_json=[{"name": "72:01:0000000:99"}],
+            source="notice_detail",
+            ordinal=0,
+        )
+    )
+    db.add(
+        LotNoticeAttribute(
+            lot_id=lot.id,
+            code="PermittedUse",
+            value_text="ИЖС",
+            value_json=[{"code": "2.1", "name": "ИЖС"}],
+            source="notice_detail",
+            ordinal=1,
+        )
+    )
+    from app.services.map_anchor import refresh_lot_map_anchor
+
+    refresh_lot_map_anchor(lot)
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    body = client.get(f"/api/lots/{lot_id}").json()
+    assert body["map_anchor_source"] == "notice"
+    assert body["map_anchor_latitude"] == 57.0
+    assert body["map_anchor_longitude"] == 65.0
+    codes = {item["code"] for item in body["notice_attributes"]}
+    assert codes == {"CadastralNumber", "PermittedUse"}
+
+
+def test_lots_map_includes_lot_with_only_map_anchor():
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    TestingSessionLocal = _setup_inmemory_app()
+    db = TestingSessionLocal()
+    lot = Lot(
+        source_id="anchor-only",
+        title="Только якорь",
+        status="active",
+        region="72",
+        map_anchor_latitude=58.1,
+        map_anchor_longitude=60.2,
+        map_anchor_source="notice",
+        map_anchor_updated_at=datetime.now(timezone.utc),
+    )
+    db.add(lot)
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    points = client.get("/api/lots-map").json()
+    match = next((p for p in points if p["lot_id"] == lot_id), None)
+    assert match is not None
+    assert match["latitude"] == 58.1
+    assert match["longitude"] == 60.2
 
 
 def test_lots_list_uses_stored_notice_identity_for_torgi_lot_url():
@@ -604,7 +693,9 @@ def test_lots_list_uses_stored_notice_identity_for_torgi_lot_url():
     assert item["notice_reg_num"] == "72000000000000000999"
     assert item["notice_lot_number"] == "7"
     assert item["notice_lot_count"] == 9
-    assert item["torgi_url"] == "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
+    assert item["torgi_url"] == (
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7/(lotInfo:info)"
+    )
 
 
 def test_lot_detail_returns_null_notice_payload_when_not_linked():
@@ -631,3 +722,124 @@ def test_lot_detail_returns_null_notice_payload_when_not_linked():
     body = response.json()
     assert body["opendata_notice_id"] is None
     assert body["notice_payload"] is None
+
+
+def test_lot_detail_pkk_url_resolves_selected_card_via_geoportal(monkeypatch):
+    from sqlalchemy import select
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "nspd_enabled", True)
+    monkeypatch.setattr(settings, "nspd_resolve_pkk_link_on_detail", True)
+
+    def fake_fetch(cad: str) -> list[dict]:
+        assert cad == "72:24:0609016:199"
+        return [
+            {
+                "properties": {"options": {"objectId": 291667829, "category": 36384}},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]],
+                },
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.services.nspd.resolve_pkk_link.fetch_nspd_features_sync",
+        fake_fetch,
+    )
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="pkk-resolve-1",
+            title="Resolve PKK",
+            status="active",
+            region="72",
+            cadastral_number="72:24:0609016:199",
+            is_izhs_candidate=False,
+        )
+    )
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    body = client.get(f"/api/lots/{lot_id}").json()
+    assert "selectedCard=291667829,36384,72:24:0609016:199" in (body["pkk_map_url"] or "")
+    assert body["pkk_map_url"] == body["nspd_map_url"]
+
+
+def test_lot_detail_pkk_falls_back_to_query_when_geoportal_empty(monkeypatch):
+    from sqlalchemy import select
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "nspd_enabled", True)
+    monkeypatch.setattr(settings, "nspd_resolve_pkk_link_on_detail", True)
+    monkeypatch.setattr(
+        "app.services.nspd.resolve_pkk_link.fetch_nspd_features_sync",
+        lambda cad: [],
+    )
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="pkk-resolve-empty",
+            title="Empty geoportal",
+            status="active",
+            region="72",
+            cadastral_number="72:01:0000999:1",
+            is_izhs_candidate=False,
+        )
+    )
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    body = client.get(f"/api/lots/{lot_id}").json()
+    assert "query=72:01:0000999:1" in (body["pkk_map_url"] or "")
+    assert "selectedCard=" not in (body["pkk_map_url"] or "")
+
+
+def test_lot_detail_pkk_skips_live_fetch_when_resolve_disabled(monkeypatch):
+    from sqlalchemy import select
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "nspd_enabled", True)
+    monkeypatch.setattr(settings, "nspd_resolve_pkk_link_on_detail", False)
+
+    def boom(_cad: str) -> list:
+        raise AssertionError("fetch should not run")
+
+    monkeypatch.setattr(
+        "app.services.nspd.resolve_pkk_link.fetch_nspd_features_sync",
+        boom,
+    )
+
+    TestingSessionLocal = _setup_inmemory_app()
+
+    db = TestingSessionLocal()
+    db.add(
+        Lot(
+            source_id="pkk-no-resolve",
+            title="No live resolve",
+            status="active",
+            region="72",
+            cadastral_number="72:01:0000888:2",
+            is_izhs_candidate=False,
+        )
+    )
+    db.commit()
+    lot_id = db.scalar(select(Lot.id))
+    db.close()
+
+    client = TestClient(app)
+    body = client.get(f"/api/lots/{lot_id}").json()
+    assert "query=72:01:0000888:2" in (body["pkk_map_url"] or "")

@@ -110,7 +110,7 @@ def test_torgi_lot_html_defaults_to_first_lot_for_single_lot_notice():
         notice_detail_url=None,
     )
     assert links.torgi_public_url(lot, None) == (
-        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_1"
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_1/(lotInfo:info)"
     )
     assert links.torgi_notice_html_url(lot, None) == (
         "https://torgi.gov.ru/new/public/notices/view/72000000000000000999"
@@ -124,7 +124,7 @@ def test_torgi_public_uses_concrete_lot_from_multilot_source_id():
         notice_detail_url=None,
     )
     assert links.torgi_public_url(lot, None) == (
-        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_4"
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_4/(lotInfo:info)"
     )
 
 
@@ -136,7 +136,7 @@ def test_torgi_public_uses_lot_number_from_snapshot_payload():
     )
     payload = {"_notice_lot": {"lotNumber": "7"}}
     assert links.torgi_public_url(lot, None, payload) == (
-        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7/(lotInfo:info)"
     )
 
 
@@ -150,7 +150,7 @@ def test_torgi_public_uses_stored_notice_identity_without_snapshot_payload():
         notice_lot_count=9,
     )
     assert links.torgi_public_url(lot, None) == (
-        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7"
+        "https://torgi.gov.ru/new/public/lots/lot/72000000000000000999_7/(lotInfo:info)"
     )
 
 
@@ -186,8 +186,8 @@ def test_domclick_map_url_uses_nspd_centroid(monkeypatch):
     assert url is not None
     assert url.startswith("https://domclick.ru/search/on-map?")
     assert "offer_type=lot" in url
-    assert "sw=57.107284,65.444392" in url
-    assert "ne=57.197116,65.610008" in url
+    assert "sw=57.107284" in url and "65.444392" in url
+    assert "ne=57.197115" in url and "65.610007" in url
 
 
 def test_domclick_map_url_falls_back_to_lot_coordinates(monkeypatch):
@@ -198,6 +198,24 @@ def test_domclick_map_url_falls_back_to_lot_coordinates(monkeypatch):
 
     assert url is not None
     assert url.startswith("https://domclick.ru/search/on-map?")
+
+
+def test_domclick_map_url_custom_base_and_aids(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_map_urls", True)
+    monkeypatch.setattr(
+        links.settings,
+        "domclick_on_map_base_url",
+        "https://xanty-mansijsk.domclick.ru/search/on-map",
+    )
+    monkeypatch.setattr(links.settings, "domclick_on_map_aids", "1026")
+    monkeypatch.setattr(links.settings, "marketplace_map_radius_km", 2.0)
+    lot = _lot(region="86", latitude=61.0, longitude=69.0)
+
+    url = links.domclick_land_map_url(lot)
+    assert url is not None
+    assert url.startswith("https://xanty-mansijsk.domclick.ru/search/on-map?")
+    assert "aids=1026" in url
+    assert "sw=" in url and "61." in url and "69." in url
 
 
 def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
@@ -213,9 +231,24 @@ def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
 
 def test_marketplace_disabled(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
+    monkeypatch.setattr(links.settings, "domclick_cadastral_search_enabled", False)
     lot = _lot(cadastral_number="72:01:1:1", region="72")
     assert links.domclick_land_search_url(lot) is None
     assert links.domclick_land_search_url_cadastral_only(lot) is None
+
+
+def test_domclick_cadastral_search_when_full_search_disabled(monkeypatch):
+    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
+    monkeypatch.setattr(links.settings, "domclick_cadastral_search_enabled", True)
+    lot = _lot(cadastral_number="72:01:1:1", region="72")
+    assert links.domclick_land_search_url(lot) is None
+    u = links.domclick_land_search_url_cadastral_only(lot)
+    assert u is not None and "domclick.ru" in u and "72%3A01%3A1%3A1" in u
+
+
+def test_pkk_lot_map_url_matches_nspd_lot_map_for_same_lot():
+    lot = _lot(cadastral_number="72:23:0123456:7")
+    assert links.pkk_lot_map_url(lot) == links.nspd_lot_map_url(lot)
 
 
 def test_torgi_json_link_when_distinct_requires_html_and_differs():
@@ -251,3 +284,4 @@ def test_domclick_disabled_when_template_empty(monkeypatch):
     monkeypatch.setattr(links.settings, "domclick_search_template", "")
     lot = _lot(cadastral_number="99:01:1:1", region="99")
     assert links.domclick_land_search_url(lot) is None
+    assert links.domclick_land_search_url_cadastral_only(lot) is None

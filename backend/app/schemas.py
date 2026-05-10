@@ -4,6 +4,14 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class LotNoticeAttributeItem(BaseModel):
+    code: str
+    value_text: str | None = None
+    value_json: Any | None = None
+    source: str = "notice_detail"
+    ordinal: int = 0
+
+
 class LotListItem(BaseModel):
     id: int
     source_id: str
@@ -88,6 +96,11 @@ class LotDetail(LotListItem):
     nspd_card_id: str | None = None
     nspd_card_type: str | None = None
     nspd_enriched_at: datetime | None = None
+    map_anchor_latitude: float | None = None
+    map_anchor_longitude: float | None = None
+    map_anchor_source: str | None = None
+    map_anchor_updated_at: datetime | None = None
+    notice_attributes: list[LotNoticeAttributeItem] = []
 
 
 class MapPoint(BaseModel):

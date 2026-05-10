@@ -1,5 +1,6 @@
 from app.services.ingest.detail_parser import (
     _parse_area_with_units,
+    extract_notice_characteristic_rows,
     match_izhs,
     parse_notice_detail,
     split_keywords,
@@ -394,3 +395,28 @@ def test_parse_notice_detail_picks_cadastral_via_characteristic_only():
     }
     result = parse_notice_detail(payload)
     assert result["cadastral_number"] == "72:23:0123456:99"
+
+
+def test_extract_notice_characteristic_rows_collects_all_codes():
+    payload = {
+        "lots": [
+            {
+                "characteristics": [
+                    {
+                        "code": "CadastralNumber",
+                        "characteristicValue": "72:01:1:1",
+                    },
+                    {
+                        "code": "PermittedUse",
+                        "characteristicValue": [{"code": "2.1", "name": "ИЖС"}],
+                    },
+                ]
+            }
+        ]
+    }
+    rows = extract_notice_characteristic_rows(payload)
+    codes = [r["code"] for r in rows]
+    assert "CadastralNumber" in codes
+    assert "PermittedUse" in codes
+    cad_row = next(r for r in rows if r["code"] == "CadastralNumber")
+    assert cad_row["value_text"] == "72:01:1:1"

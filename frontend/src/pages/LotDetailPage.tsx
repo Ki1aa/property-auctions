@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchLot } from "../api";
+import { LotExternalLinks } from "../components/LotExternalLinks";
 import { StatusBadge } from "../components/StatusBadge";
 import { LotDetail, MapPoint } from "../types";
 
@@ -94,8 +95,8 @@ export function LotDetailPage() {
     );
   }
 
-  const mapLatitude = lot.nspd_centroid_latitude ?? lot.latitude;
-  const mapLongitude = lot.nspd_centroid_longitude ?? lot.longitude;
+  const mapLatitude = lot.map_anchor_latitude ?? lot.nspd_centroid_latitude ?? lot.latitude;
+  const mapLongitude = lot.map_anchor_longitude ?? lot.nspd_centroid_longitude ?? lot.longitude;
   const mapPoint: MapPoint | null =
     mapLatitude !== null && mapLongitude !== null
       ? { lot_id: lot.id, title: lot.title, status: lot.status, latitude: mapLatitude, longitude: mapLongitude }
@@ -104,7 +105,6 @@ export function LotDetailPage() {
   const hasLandSection =
     lot.cadastral_number || lot.area_sqm !== null || lot.land_category || lot.permitted_use || lot.address;
 
-  const jsonNoticeHref = lot.torgi_json_url || lot.notice_detail_url || lot.source_url;
   const noticeLotLabel =
     lot.notice_lot_number && lot.notice_lot_count
       ? `лот ${lot.notice_lot_number} из ${lot.notice_lot_count}`
@@ -158,110 +158,17 @@ export function LotDetailPage() {
       </section>
 
       <section className="section">
-        <h2>Ссылки на лот и карты</h2>
+        <h2>Ссылки</h2>
         <div className="card">
-          {lot.torgi_url ? (
-            <div className="card__row">
-              <span className="card__label">Лот на ГИС Торги</span>
-              <span>
-                <a href={lot.torgi_url} target="_blank" rel="noreferrer">
-                  Открыть карточку лота
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.torgi_notice_url ? (
-            <div className="card__row">
-              <span className="card__label">Извещение на ГИС Торги</span>
-              <span>
-                <a href={lot.torgi_notice_url} target="_blank" rel="noreferrer">
-                  Открыть извещение
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.torgi_json_url ? (
-            <div className="card__row">
-              <span className="card__label">JSON извещения</span>
-              <span>
-                <a href={lot.torgi_json_url} target="_blank" rel="noreferrer">
-                  Скачать / открыть JSON
-                </a>
-              </span>
-            </div>
-          ) : jsonNoticeHref && jsonNoticeHref !== lot.torgi_url && jsonNoticeHref !== lot.torgi_notice_url ? (
-            <div className="card__row">
-              <span className="card__label">JSON извещения</span>
-              <span>
-                <a href={jsonNoticeHref} target="_blank" rel="noreferrer">
-                  Скачать / открыть JSON
-                </a>
-              </span>
-            </div>
-          ) : null}
-          <p className="card__note">
+          <LotExternalLinks lot={lot} showAppPublicUrl />
+          <p className="card__note lot-detail-links-note">
             Эта карточка соответствует конкретному лоту:
             {lot.notice_reg_num ? ` извещение ${lot.notice_reg_num}` : " извещение не определено"}
             {lot.notice_lot_number ? `, ${noticeLotLabel}` : ""}.
           </p>
-          {lot.pkk_map_url ? (
-            <div className="card__row">
-              <span className="card__label">ПКК (НСПД)</span>
-              <span>
-                <a href={lot.pkk_map_url} target="_blank" rel="noreferrer">
-                  Публичная кадастровая карта — поиск по кадастру на nspd.gov.ru
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.nspd_map_url && lot.nspd_map_url !== lot.pkk_map_url ? (
-            <div className="card__row">
-              <span className="card__label">НСПД (ФГИС ЕГРН)</span>
-              <span>
-                <a href={lot.nspd_map_url} target="_blank" rel="noreferrer">
-                  Карта с центроидом / карточкой участка (обогащение НСПД)
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.pkk_map_url || lot.nspd_map_url ? (
+          {(lot.domclick_map_url || lot.domclick_search_url_cadastral) && (
             <p className="card__footnote">
-              Если карта не откроет участок автоматически, вставьте кадастровый номер {lot.cadastral_number || "из карточки"} в поиск.
-            </p>
-          ) : null}
-          {lot.domclick_map_url ? (
-            <div className="card__row">
-              <span className="card__label">Домклик</span>
-              <span>
-                <a href={lot.domclick_map_url} target="_blank" rel="noreferrer">
-                  Карта объявлений в округе
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.domclick_search_url_cadastral ? (
-            <div className="card__row">
-              <span className="card__label">Домклик (кадастр)</span>
-              <span>
-                <a href={lot.domclick_search_url_cadastral} target="_blank" rel="noreferrer">
-                  Поиск по кадастровому номеру
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.domclick_search_url ? (
-            <div className="card__row">
-              <span className="card__label">Домклик (расширенный)</span>
-              <span>
-                <a href={lot.domclick_search_url} target="_blank" rel="noreferrer">
-                  Поиск участков (оценочно)
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {(lot.domclick_map_url || lot.domclick_search_url || lot.domclick_search_url_cadastral) && (
-            <p className="card__footnote">
-              Ссылки Домклик ведут в общий поиск или карту района; это не официальная карточка участка и не оценка рынка.
+              Домклик: карта объявлений по координатам участка или текстовый поиск по кадастру; не официальная карточка участка и не оценка рынка.
             </p>
           )}
         </div>
@@ -334,6 +241,33 @@ export function LotDetailPage() {
         </div>
       </section>
 
+      {lot.notice_attributes.length > 0 && (
+        <section className="section">
+          <h2>Характеристики из ГИС (detail JSON)</h2>
+          <p className="card__footnote" style={{ marginBottom: 12 }}>
+            Все пары code / значение из блока characteristics в JSON извещения; для поиска и отладки парсера.
+          </p>
+          <div className="card lot-notice-attrs">
+            <table className="table table--compact">
+              <thead>
+                <tr>
+                  <th>Код</th>
+                  <th>Значение (текст)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lot.notice_attributes.map((row) => (
+                  <tr key={`${row.code}-${row.ordinal}-${row.source}`}>
+                    <td className="cell--mono">{row.code}</td>
+                    <td>{row.value_text || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {hasLandSection && (
         <section className="section">
           <h2>Кадастр и земля</h2>
@@ -362,9 +296,28 @@ export function LotDetailPage() {
               </span>
             </div>
             <div className="card__row">
-              <span className="card__label">Центроид для карты</span>
-              <span>{lot.map_centroid_available ? "Да (НСПД или извещение)" : "Нет"}</span>
+              <span className="card__label">Точка для карты</span>
+              <span>
+                {lot.map_centroid_available
+                  ? lot.map_anchor_source === "nspd_polygon"
+                    ? "Да (канон: центроид НСПД)"
+                    : lot.map_anchor_source === "notice"
+                      ? "Да (канон: координаты извещения)"
+                      : "Да"
+                  : "Нет"}
+              </span>
             </div>
+            {(lot.map_anchor_latitude != null || lot.map_anchor_source) && (
+              <div className="card__row">
+                <span className="card__label">Канон координат (якорь)</span>
+                <span>
+                  {lot.map_anchor_latitude != null && lot.map_anchor_longitude != null
+                    ? `${lot.map_anchor_latitude.toFixed(6)}, ${lot.map_anchor_longitude.toFixed(6)}`
+                    : "—"}
+                  {lot.map_anchor_source ? ` · ${lot.map_anchor_source}` : ""}
+                </span>
+              </div>
+            )}
             <div className="card__row"><span className="card__label">Адрес</span><span>{lot.address || "—"}</span></div>
           </div>
         </section>

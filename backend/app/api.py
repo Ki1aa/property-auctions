@@ -8,7 +8,7 @@ from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
+from app.models import IngestRun, Lot, LotNoticeAttribute, LotSnapshot, OpenDataNotice, Organizer
 from app import scheduler as ingest_scheduler
 from app.config import settings
 from app.services.external_lot_links import (
@@ -17,7 +17,7 @@ from app.services.external_lot_links import (
     domclick_land_search_url,
     domclick_land_search_url_cadastral_only,
     nspd_lot_map_url,
-    pkk_map_url,
+    pkk_lot_map_url,
     torgi_notice_html_url,
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
@@ -29,7 +29,7 @@ from app.services.lot_baseline import (
     load_baseline_index,
     lot_valuation,
 )
-from app.services.lot_identity import lot_notice_identity
+from app.services.lot_identity import lot_notice_identity, lot_preferred_list_title
 from app.services.market_median import load_market_median_stats, valuation_with_market
 from app.schemas import (
     IngestRunView,
@@ -38,6 +38,7 @@ from app.schemas import (
     LotFacets,
     LotListItem,
     LotListPage,
+    LotNoticeAttributeItem,
     LotQualityMetrics,
     MapPoint,
     ManualIngestStartResponse,
@@ -45,6 +46,8 @@ from app.schemas import (
     OpenDataNoticeListItem,
     OpenDataNoticeListPage,
 )
+from app.services.map_anchor import lot_has_map_centroid, lot_map_display_coordinates
+from app.services.nspd.resolve_pkk_link import pkk_lot_map_url_for_detail
 
 router = APIRouter(prefix="/api")
 
@@ -81,11 +84,7 @@ def _nspd_data_status(lot: Lot) -> str:
 
 
 def _map_centroid_available(lot: Lot) -> bool:
-    if lot.nspd_centroid_latitude is not None and lot.nspd_centroid_longitude is not None:
-        return True
-    if lot.latitude is not None and lot.longitude is not None:
-        return True
-    return False
+    return lot_has_map_centroid(lot)
 
 
 def _merged_valuation(lot: Lot, baseline_index: dict, market_stats: dict) -> LotValuation:
@@ -106,10 +105,33 @@ def _normalize_str_list(values: str | list[str] | None) -> list[str] | None:
     return cleaned or None
 
 
+def _latest_payload_by_lot_ids(db: Session, lot_ids: list[int]) -> dict[int, dict[str, Any] | None]:
+    if not lot_ids:
+        return {}
+    subq = (
+        select(LotSnapshot.lot_id, func.max(LotSnapshot.id).label("max_id"))
+        .where(LotSnapshot.lot_id.in_(lot_ids))
+        .group_by(LotSnapshot.lot_id)
+        .subquery()
+    )
+    snaps = db.execute(
+        select(LotSnapshot).join(
+            subq,
+            (LotSnapshot.lot_id == subq.c.lot_id) & (LotSnapshot.id == subq.c.max_id),
+        )
+    ).scalars().all()
+    out: dict[int, dict[str, Any] | None] = dict.fromkeys(lot_ids)
+    for snap in snaps:
+        p = snap.payload
+        out[snap.lot_id] = p if isinstance(p, dict) else None
+    return out
+
+
 def _lot_list_item(
     lot: Lot,
     valuation: LotValuation | None = None,
     latest_payload: dict[str, Any] | None = None,
+    notice_payload: dict[str, Any] | None = None,
 ) -> LotListItem:
     ps, pm = derived_prices(lot.start_price, lot.area_sqm)
     valuation = valuation or LotValuation()
@@ -117,7 +139,7 @@ def _lot_list_item(
     return LotListItem(
         id=lot.id,
         source_id=lot.source_id,
-        title=lot.title,
+        title=lot_preferred_list_title(lot, latest_payload, notice_payload),
         status=lot.status,
         region=lot.region,
         category=lot.category,
@@ -155,7 +177,7 @@ def _lot_list_item(
         torgi_notice_url=torgi_notice_html_url(lot, None),
         torgi_json_url=torgi_notice_json_link_when_distinct(lot, None, latest_payload),
         nspd_map_url=nspd_lot_map_url(lot),
-        pkk_map_url=pkk_map_url(lot.cadastral_number),
+        pkk_map_url=pkk_lot_map_url(lot),
         domclick_map_url=domclick_land_map_url(lot),
         domclick_search_url=domclick_land_search_url(lot),
         domclick_search_url_cadastral=domclick_land_search_url_cadastral_only(lot),
@@ -304,8 +326,11 @@ def list_lots(
             reverse=True,
         )
         rows = sorted_rows[offset : offset + limit]
+        payloads = _latest_payload_by_lot_ids(db, [row.id for row in rows])
         return LotListPage(
-            items=[_lot_list_item(row, valuations[row.id]) for row in rows],
+            items=[
+                _lot_list_item(row, valuations[row.id], payloads.get(row.id)) for row in rows
+            ],
             total=len(sorted_rows),
             limit=limit,
             offset=offset,
@@ -318,8 +343,9 @@ def list_lots(
     stmt = stmt.offset(offset).limit(limit)
     rows = db.scalars(stmt).all()
     valuations = {row.id: _merged_valuation(row, baseline_index, market_stats) for row in rows}
+    payloads = _latest_payload_by_lot_ids(db, [row.id for row in rows])
     return LotListPage(
-        items=[_lot_list_item(row, valuations[row.id]) for row in rows],
+        items=[_lot_list_item(row, valuations[row.id], payloads.get(row.id)) for row in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -389,6 +415,8 @@ def export_lots_csv(
         rows = db.scalars(stmt).all()
         valuations = {row.id: lot_valuation(row, baseline_index) for row in rows}
 
+    export_payloads = _latest_payload_by_lot_ids(db, [lot.id for lot in rows])
+
     buf = StringIO()
     buf.write("\ufeff")
     writer = csv.writer(buf, lineterminator="\n")
@@ -422,11 +450,12 @@ def export_lots_csv(
     for lot in rows:
         ps, pm = derived_prices(lot.start_price, lot.area_sqm)
         valuation = valuations[lot.id]
+        export_title = lot_preferred_list_title(lot, export_payloads.get(lot.id))
         writer.writerow(
             [
                 lot.id,
                 lot.source_id,
-                lot.title,
+                export_title,
                 lot.status or "",
                 lot.region or "",
                 lot.category or "",
@@ -539,11 +568,29 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         select(LotSnapshot).where(LotSnapshot.lot_id == lot.id).order_by(desc(LotSnapshot.id))
     )
     latest_payload = latest_snapshot.payload if latest_snapshot is not None and isinstance(latest_snapshot.payload, dict) else None
-    list_base = _lot_list_item(lot, valuation, latest_payload)
+    attr_rows = db.scalars(
+        select(LotNoticeAttribute)
+        .where(LotNoticeAttribute.lot_id == lot.id)
+        .order_by(LotNoticeAttribute.ordinal, LotNoticeAttribute.id)
+    ).all()
+    notice_attributes = [
+        LotNoticeAttributeItem(
+            code=a.code,
+            value_text=a.value_text,
+            value_json=a.value_json,
+            source=a.source,
+            ordinal=a.ordinal,
+        )
+        for a in attr_rows
+    ]
+    list_base = _lot_list_item(lot, valuation, latest_payload, notice_payload)
     list_fields = list_base.model_dump()
     list_fields["torgi_url"] = torgi_public_url(lot, notice_payload, latest_payload)
     list_fields["torgi_notice_url"] = torgi_notice_html_url(lot, notice_payload)
     list_fields["torgi_json_url"] = torgi_notice_json_link_when_distinct(lot, notice_payload, latest_payload)
+    detail_pkk = pkk_lot_map_url_for_detail(lot)
+    list_fields["pkk_map_url"] = detail_pkk
+    list_fields["nspd_map_url"] = detail_pkk
     return LotDetail(
         **list_fields,
         latitude=lot.latitude,
@@ -565,6 +612,11 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
         nspd_card_id=lot.nspd_card_id,
         nspd_card_type=lot.nspd_card_type,
         nspd_enriched_at=lot.nspd_enriched_at,
+        map_anchor_latitude=lot.map_anchor_latitude,
+        map_anchor_longitude=lot.map_anchor_longitude,
+        map_anchor_source=lot.map_anchor_source,
+        map_anchor_updated_at=lot.map_anchor_updated_at,
+        notice_attributes=notice_attributes,
     )
 
 
@@ -574,8 +626,9 @@ def map_points(db: Session = Depends(get_db)):
         select(Lot)
         .where(
             or_(
-                and_(Lot.latitude.is_not(None), Lot.longitude.is_not(None)),
+                and_(Lot.map_anchor_latitude.is_not(None), Lot.map_anchor_longitude.is_not(None)),
                 and_(Lot.nspd_centroid_latitude.is_not(None), Lot.nspd_centroid_longitude.is_not(None)),
+                and_(Lot.latitude.is_not(None), Lot.longitude.is_not(None)),
             )
         )
         .order_by(desc(Lot.updated_at))
@@ -583,14 +636,14 @@ def map_points(db: Session = Depends(get_db)):
     ).all()
     points: list[MapPoint] = []
     for row in rows:
-        latitude = row.nspd_centroid_latitude if row.nspd_centroid_latitude is not None else row.latitude
-        longitude = row.nspd_centroid_longitude if row.nspd_centroid_longitude is not None else row.longitude
-        if latitude is None or longitude is None:
+        coords = lot_map_display_coordinates(row)
+        if coords is None:
             continue
+        latitude, longitude = coords
         points.append(
             MapPoint(
                 lot_id=row.id,
-                title=row.title,
+                title=lot_preferred_list_title(row, None, None),
                 status=row.status,
                 latitude=latitude,
                 longitude=longitude,

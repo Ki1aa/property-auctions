@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Lot
+from app.services.map_anchor import refresh_lot_map_anchor
 from app.services.nspd.client import NspdGeoportalClient
 from app.services.nspd.geometry import polygon_centroid_lat_lon
 
@@ -105,6 +106,7 @@ def apply_nspd_features_to_lot(lot: Lot, features: list[dict[str, Any]]) -> None
         lot.nspd_centroid_longitude = None
         lot.nspd_card_id = None
         lot.nspd_card_type = None
+        refresh_lot_map_anchor(lot)
         return
     extracted = extract_nspd_options_from_feature(features[0])
     lot.nspd_specified_area_sqm = extracted["nspd_specified_area_sqm"]
@@ -119,6 +121,7 @@ def apply_nspd_features_to_lot(lot: Lot, features: list[dict[str, Any]]) -> None
         extracted["nspd_specified_area_sqm"],
         extracted["nspd_readable_address"],
     )
+    refresh_lot_map_anchor(lot)
 
 
 def nspd_cache_is_fresh(lot: Lot) -> bool:

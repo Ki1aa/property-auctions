@@ -67,6 +67,11 @@ class Lot(Base):
     nspd_card_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     nspd_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
+    map_anchor_latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    map_anchor_longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    map_anchor_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    map_anchor_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -74,6 +79,30 @@ class Lot(Base):
     snapshots: Mapped[list["LotSnapshot"]] = relationship(back_populates="lot")
     opendata_notice: Mapped["OpenDataNotice | None"] = relationship(foreign_keys=[opendata_notice_id])
     market_comparables: Mapped[list["MarketComparable"]] = relationship(back_populates="lot")
+    notice_attributes: Mapped[list["LotNoticeAttribute"]] = relationship(
+        back_populates="lot",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class LotNoticeAttribute(Base):
+    __tablename__ = "lot_notice_attributes"
+    __table_args__ = (
+        Index("ix_lot_notice_attributes_lot_code", "lot_id", "code"),
+        Index("ix_lot_notice_attributes_code_value_text", "code", "value_text"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lot_id: Mapped[int] = mapped_column(ForeignKey("lots.id", ondelete="CASCADE"), index=True)
+    code: Mapped[str] = mapped_column(String(128), index=True)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_json: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="notice_detail", server_default="notice_detail")
+    ordinal: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lot: Mapped["Lot"] = relationship(back_populates="notice_attributes")
 
 
 class LotSnapshot(Base):

@@ -97,6 +97,14 @@ export type LotListPage = {
   offset: number;
 };
 
+export type LotNoticeAttributeItem = {
+  code: string;
+  value_text: string | null;
+  value_json: unknown;
+  source: string;
+  ordinal: number;
+};
+
 export type LotDetail = Lot & {
   latitude: number | null;
   longitude: number | null;
@@ -117,6 +125,11 @@ export type LotDetail = Lot & {
   nspd_card_id: string | null;
   nspd_card_type: string | null;
   nspd_enriched_at: string | null;
+  map_anchor_latitude: number | null;
+  map_anchor_longitude: number | null;
+  map_anchor_source: string | null;
+  map_anchor_updated_at: string | null;
+  notice_attributes: LotNoticeAttributeItem[];
 };
 
 export type MapPoint = {

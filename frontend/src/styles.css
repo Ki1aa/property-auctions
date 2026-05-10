@@ -713,14 +713,6 @@ tr:hover td {
   width: 12%;
 }
 
-.lots-table__baseline-col {
-  width: 11%;
-}
-
-.lots-table__confidence-col {
-  width: 9%;
-}
-
 .lots-table__updated-col {
   width: 11%;
 }
@@ -737,26 +729,28 @@ tr:hover td {
   min-width: 0;
 }
 
-.lots-table__links {
+.lot-external-links {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.lot-external-links__item {
+  display: block;
+  color: var(--primary);
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  padding: 3px 0;
+}
+
+.lot-external-links__item:hover {
+  text-decoration: underline;
 }
 
 .lots-table__dates-cell {
   min-width: 0;
-}
-
-.lots-table__ext-link {
-  color: var(--primary);
-  font-weight: 600;
-}
-
-.lots-table__open-link {
-  min-height: 32px;
-  padding: 6px 12px;
-  color: #fff;
 }
 
 .lots-table__lot-cell {
@@ -1152,6 +1146,10 @@ tr:hover td {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.lot-detail-links-note {
+  margin-top: 14px;
 }
 
 /* Misc */

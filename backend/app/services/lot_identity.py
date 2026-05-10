@@ -128,3 +128,42 @@ def lot_notice_identity(
         latest_payload=latest_payload,
         notice_payload=notice_payload,
     )
+
+
+def lot_preferred_list_title(
+    lot: Any,
+    latest_payload: dict[str, Any] | None = None,
+    notice_payload: dict[str, Any] | None = None,
+) -> str:
+    """Display title for a trading lot (not the notice name): snapshot lotName, cadastre, Лот N · regNum, then DB title."""
+    if isinstance(latest_payload, dict):
+        sub = latest_payload.get("_notice_lot")
+        if isinstance(sub, dict):
+            for key in ("lotName", "lotDescription"):
+                fragment = str(sub.get(key) or "").strip()
+                if fragment:
+                    return fragment
+
+    ident = lot_notice_identity(lot, latest_payload=latest_payload, notice_payload=notice_payload)
+    lot_n = ident.lot_number
+    lot_c = ident.lot_count
+    multi = lot_c is not None and lot_c > 1
+    cad = _clean_str(getattr(lot, "cadastral_number", None))
+    reg = _clean_str(ident.reg_num)
+
+    if multi and lot_n:
+        if cad:
+            return f"Лот {lot_n}: {cad}"
+        if reg:
+            return f"Лот {lot_n} · {reg}"
+        return f"Лот {lot_n}"
+
+    if cad:
+        return cad
+
+    if lot_n:
+        if reg:
+            return f"Лот {lot_n} · {reg}"
+        return f"Лот {lot_n}"
+
+    return _clean_str(getattr(lot, "title", None)) or "Без названия"

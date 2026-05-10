@@ -41,6 +41,10 @@ def test_apply_nspd_features_empty_clears():
         nspd_readable_address="old",
         nspd_card_id="old-id",
         nspd_card_type="old-type",
+        nspd_centroid_latitude=57.0,
+        nspd_centroid_longitude=65.0,
+        latitude=55.0,
+        longitude=66.0,
     )
     apply_nspd_features_to_lot(lot, [])
     assert lot.nspd_specified_area_sqm is None
@@ -49,6 +53,10 @@ def test_apply_nspd_features_empty_clears():
     assert lot.nspd_card_type is None
     assert lot.nspd_enriched_at is not None
     assert isinstance(lot.nspd_enriched_at, datetime)
+    assert lot.nspd_centroid_latitude is None
+    assert lot.map_anchor_latitude == 55.0
+    assert lot.map_anchor_longitude == 66.0
+    assert lot.map_anchor_source == "notice"
 
 
 def test_epsg3857_origin():
@@ -99,6 +107,8 @@ def test_apply_nspd_features_runs_merge(monkeypatch):
     assert lot.area_sqm == 42.0
     assert lot.address == "keep"
     assert lot.nspd_specified_area_sqm == 42.0
+    assert lot.map_anchor_source == "nspd_polygon"
+    assert lot.map_anchor_latitude is not None
 
 
 def test_apply_nspd_features_sets_card_identifiers():
@@ -111,3 +121,4 @@ def test_apply_nspd_features_sets_card_identifiers():
     apply_nspd_features_to_lot(lot, [feature])
     assert lot.nspd_card_id == "291667829"
     assert lot.nspd_card_type == "36384"
+    assert lot.map_anchor_source == "nspd_polygon"

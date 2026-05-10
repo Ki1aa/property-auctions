@@ -20,11 +20,26 @@ def parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+def _opendata_notice_row_title(item: dict[str, Any], reg_num: str) -> str:
+    """Lot-scoped title for OpenData index rows; avoid notice-level noticeName in Lot.title."""
+    lots = item.get("lots")
+    if isinstance(lots, list):
+        for row in lots:
+            if not isinstance(row, dict):
+                continue
+            fragment = _pick(row, "lotName", "name", "title", "subject", "lotDescription")
+            if fragment not in (None, ""):
+                return str(fragment).strip()
+    if reg_num:
+        return f"Лот 1 · {reg_num}"
+    return "Лот"
+
+
 def normalize_lot(item: dict[str, Any]) -> dict[str, Any]:
     # OpenData notice dataset fallback fields
     if "regNum" in item and "href" in item:
         reg_num = str(_pick(item, "regNum") or "")
-        title = str(_pick(item, "noticeName", "estateObjectName") or f"Извещение {reg_num}" if reg_num else "Извещение")
+        title = _opendata_notice_row_title(item, reg_num)
         right_holder = str(_pick(item, "rightHolderCode") or "")
         bidder = str(_pick(item, "bidderOrgCode") or "")
         organizer_code = right_holder or bidder or "unknown"

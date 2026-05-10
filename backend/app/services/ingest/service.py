@@ -6,14 +6,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 from dateutil import parser as date_parser
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import IngestManifest, IngestRun, Lot, LotSnapshot, OpenDataNotice, Organizer
+from app.models import IngestManifest, IngestRun, Lot, LotNoticeAttribute, LotSnapshot, OpenDataNotice, Organizer
 from app.services.alerts.service import notify_lot_event
 from app.services.ingest.client import fetch_json_payload, fetch_json_payload_with_meta, save_raw_payload
-from app.services.ingest.detail_parser import match_izhs, parse_notice_detail, split_keywords
+from app.services.ingest.detail_parser import (
+    extract_notice_characteristic_rows,
+    match_izhs,
+    parse_notice_detail,
+    split_keywords,
+)
+from app.services.map_anchor import refresh_lot_map_anchor
 from app.services.ingest.discovery import DiscoveredDatasetFile, build_discovery_plan
 from app.services.ingest.normalizer import normalize_lot
 from app.services.lot_identity import notice_identity_from_values
@@ -22,6 +28,30 @@ from app.services.nspd.enrich import maybe_enrich_lot_nspd_async
 logger = logging.getLogger(__name__)
 
 DETAIL_FETCH_RETRY_BACKOFF_SEC = 1.5
+
+
+def _replace_lot_notice_attributes(db: Session, lot_id: int, rows: list[dict[str, Any]]) -> None:
+    db.execute(delete(LotNoticeAttribute).where(LotNoticeAttribute.lot_id == lot_id))
+    for row in rows:
+        code = row.get("code")
+        if not code or not str(code).strip():
+            continue
+        value_text = row.get("value_text")
+        if isinstance(value_text, str):
+            value_text = value_text.strip() or None
+        value_json = row.get("value_json")
+        source = str(row.get("source") or "notice_detail").strip()[:32] or "notice_detail"
+        ordinal = int(row.get("ordinal") or 0)
+        db.add(
+            LotNoticeAttribute(
+                lot_id=lot_id,
+                code=str(code).strip()[:128],
+                value_text=value_text,
+                value_json=value_json,
+                source=source,
+                ordinal=ordinal,
+            )
+        )
 STRUCTURE_VERSION_RE = re.compile(r"structure-(\d+)")
 LAND_BIDDING_TYPE_CODES = frozenset(("ZK",))
 LAND_PLOT_TEXT_MARKERS = (
@@ -660,6 +690,7 @@ def _expanded_normalized_lots_from_detail(
         lot_number = _lot_number(lot_payload, index)
 
         lot_normalized = dict(normalized)
+        lot_normalized["notice_characteristic_rows"] = extract_notice_characteristic_rows(scoped_detail)
         lot_normalized["organizer"] = dict(normalized["organizer"])
         if total > 1 and index > 0:
             lot_normalized["source_id"] = f"{base_source_id}:lot:{lot_number}"
@@ -683,7 +714,10 @@ def _expanded_normalized_lots_from_detail(
         if lot_title:
             lot_normalized["title"] = lot_title
         elif total > 1:
-            lot_normalized["title"] = f"{normalized['title']} - лот {lot_number}"
+            reg_disp = lot_normalized.get("notice_reg_num") or base_source_id
+            lot_normalized["title"] = (
+                f"Лот {lot_number} · {reg_disp}" if reg_disp else f"Лот {lot_number}"
+            )
 
         lot_normalized["cadastral_number"] = parsed.get("cadastral_number")
         lot_normalized["area_sqm"] = parsed.get("area_sqm")
@@ -718,15 +752,27 @@ async def _maybe_enrich_with_detail(
     if not settings.ingest_fetch_notice_details:
         normalized.setdefault("is_izhs_candidate", False)
         _apply_notice_identity_defaults(normalized)
+        normalized.setdefault(
+            "notice_characteristic_rows",
+            extract_notice_characteristic_rows(normalized.get("raw")),
+        )
         return already_fetched, [normalized]
     if already_fetched >= settings.ingest_detail_max_per_run:
         normalized.setdefault("is_izhs_candidate", False)
         _apply_notice_identity_defaults(normalized)
+        normalized.setdefault(
+            "notice_characteristic_rows",
+            extract_notice_characteristic_rows(normalized.get("raw")),
+        )
         return already_fetched, [normalized]
     detail_url = normalized.get("source_url")
     if not detail_url:
         normalized.setdefault("is_izhs_candidate", False)
         _apply_notice_identity_defaults(normalized)
+        normalized.setdefault(
+            "notice_characteristic_rows",
+            extract_notice_characteristic_rows(normalized.get("raw")),
+        )
         return already_fetched, [normalized]
 
     try:
@@ -735,6 +781,10 @@ async def _maybe_enrich_with_detail(
         logger.warning("Detail fetch failed for %s: %s", detail_url, exc)
         normalized.setdefault("is_izhs_candidate", False)
         _apply_notice_identity_defaults(normalized)
+        normalized.setdefault(
+            "notice_characteristic_rows",
+            extract_notice_characteristic_rows(normalized.get("raw")),
+        )
         return already_fetched, [normalized]
 
     return (
@@ -814,6 +864,11 @@ async def _upsert_lot(
         lot.opendata_notice_id = opendata_notice_id
     db.flush()
 
+    attr_rows = normalized.get("notice_characteristic_rows")
+    if attr_rows is None:
+        attr_rows = extract_notice_characteristic_rows(normalized.get("raw"))
+    _replace_lot_notice_attributes(db, lot.id, attr_rows)
+
     new_hash = _payload_hash(normalized["raw"])
     changed = created or new_hash != old_hash
     if changed:
@@ -823,6 +878,7 @@ async def _upsert_lot(
     db.refresh(lot)
 
     await maybe_enrich_lot_nspd_async(db, lot, nspd_budget)
+    refresh_lot_map_anchor(lot)
 
     price_changed = _price_changed(old_start_price, lot.start_price) or _price_changed(
         old_current_price,

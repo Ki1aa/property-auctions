@@ -527,3 +527,55 @@ def match_izhs(payload: Any, keywords: list[str]) -> bool:
 
 def split_keywords(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _json_safe_for_storage(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe_for_storage(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_for_storage(v) for v in value]
+    return str(value)
+
+
+def extract_notice_characteristic_rows(
+    payload: Any,
+    *,
+    source: str = "notice_detail",
+) -> list[dict[str, Any]]:
+    """Collect all GIS Torgi `characteristics` entries from a detail JSON subtree.
+
+    Each row: code, value_text, value_json (JSON-serializable characteristicValue), source.
+    """
+    rows: list[dict[str, Any]] = []
+    ordinal = 0
+    for node in _walk(payload):
+        if not isinstance(node, dict):
+            continue
+        characteristics = node.get("characteristics")
+        if not isinstance(characteristics, list):
+            continue
+        for item in characteristics:
+            if not isinstance(item, dict):
+                continue
+            code_raw = item.get("code")
+            if not isinstance(code_raw, str) or not code_raw.strip():
+                continue
+            code = code_raw.strip()[:128]
+            raw_val = item.get("characteristicValue")
+            value_json = _json_safe_for_storage(raw_val)
+            value_text = _characteristic_to_text(raw_val)
+            rows.append(
+                {
+                    "code": code,
+                    "value_text": value_text,
+                    "value_json": value_json,
+                    "source": source,
+                    "ordinal": ordinal,
+                }
+            )
+            ordinal += 1
+    return rows

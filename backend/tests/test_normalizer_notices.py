@@ -16,9 +16,22 @@ def test_normalize_lot_from_opendata_notice():
     normalized = normalize_lot(item)
 
     assert normalized["source_id"] == "21000035130000000340"
-    assert normalized["title"].startswith("Извещение")
+    assert normalized["title"] == "Лот 1 · 21000035130000000340"
     assert normalized["status"] == "notice"
     assert normalized["region"] == "77"
     assert normalized["category"] == "178FZ"
     assert normalized["source_url"] == item["href"]
     assert normalized["organizer"]["source_id"] == "2100003513"
+
+
+def test_normalize_lot_from_opendata_notice_uses_first_lot_name_when_present():
+    item = {
+        "regNum": "21000035130000000341",
+        "documentType": "notice",
+        "publishDate": "2026-04-22T05:06:01.737Z",
+        "href": "https://torgi.gov.ru/new/opendata/7710568760-notice/docs/notice_124.json",
+        "bidderOrgCode": "2100003513",
+        "lots": [{"lotNumber": "1", "lotName": "Земельный участок ИЖС"}],
+    }
+    normalized = normalize_lot(item)
+    assert normalized["title"] == "Земельный участок ИЖС"

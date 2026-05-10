@@ -15,7 +15,7 @@ from app.services.external_lot_links import (
     domclick_land_search_url,
     domclick_land_search_url_cadastral_only,
     nspd_lot_map_url,
-    pkk_map_url,
+    pkk_lot_map_url,
     torgi_notice_html_url,
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
@@ -366,19 +366,18 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     _append_unique_link(link_parts, seen_urls, app_u, "Монитор")
     _append_unique_link(link_parts, seen_urls, t_url, "ГИС Торги (лот)")
     _append_unique_link(link_parts, seen_urls, t_notice_url, "ГИС Торги (извещение)")
-    _append_unique_link(link_parts, seen_urls, pkk_map_url(lot.cadastral_number), "ПКК (НСПД)")
+    _append_unique_link(link_parts, seen_urls, pkk_lot_map_url(lot), "ПКК (НСПД)")
     _append_unique_link(link_parts, seen_urls, nspd_u, "НСПД (ФГИС ЕГРН)")
-    _append_unique_link(link_parts, seen_urls, dom_map, "Домклик")
+    _append_unique_link(link_parts, seen_urls, dom_map, "Домклик (карта)")
+    if settings.domclick_cadastral_search_enabled:
+        _append_unique_link(link_parts, seen_urls, dom_cad, "Домклик (поиск, кадастр)")
     if settings.include_marketplace_search_urls:
-        if lot.cadastral_number:
-            _append_unique_link(link_parts, seen_urls, dom_cad, "Домклик (поиск, кадастр)")
-        else:
-            _append_unique_link(link_parts, seen_urls, dom, "Домклик (поиск, адрес)")
+        _append_unique_link(link_parts, seen_urls, dom, "Домклик (поиск, расширенный)")
     _append_unique_link(link_parts, seen_urls, t_json, "ГИС Торги (JSON)")
     lines.append(" | ".join(link_parts) if link_parts else "—")
     lines.append("")
     lines.append("<i>Baseline считается по уже загруженным торгам, это ещё не рыночная оценка по объявлениям.</i>")
-    if settings.include_marketplace_search_urls:
+    if settings.domclick_cadastral_search_enabled or settings.include_marketplace_search_urls:
         lines.append(
             "<i>Домклик (поиск): шаблонный запрос по кадастру/адресу; не гарантирует карточку участка.</i>"
         )
