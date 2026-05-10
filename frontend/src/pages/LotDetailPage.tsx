@@ -94,9 +94,11 @@ export function LotDetailPage() {
     );
   }
 
+  const mapLatitude = lot.nspd_centroid_latitude ?? lot.latitude;
+  const mapLongitude = lot.nspd_centroid_longitude ?? lot.longitude;
   const mapPoint: MapPoint | null =
-    lot.latitude !== null && lot.longitude !== null
-      ? { lot_id: lot.id, title: lot.title, status: lot.status, latitude: lot.latitude, longitude: lot.longitude }
+    mapLatitude !== null && mapLongitude !== null
+      ? { lot_id: lot.id, title: lot.title, status: lot.status, latitude: mapLatitude, longitude: mapLongitude }
       : null;
 
   const hasLandSection =

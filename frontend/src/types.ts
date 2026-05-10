@@ -152,6 +152,8 @@ export type IngestStatus = {
   fetch_notice_details: boolean;
   detail_max_per_run: number;
   target_region_codes: string;
+  ingest_only_land_lots: boolean;
+  telegram_alert_region_codes: string;
   telegram_digest_enabled: boolean;
   telegram_digest_interval_minutes: number;
   telegram_digest_next_at: string | null;

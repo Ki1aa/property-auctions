@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchIngestRuns, fetchLotQualityMetrics, fetchLots, fetchNotices } from "../api";
+import { fetchIngestRuns, fetchIngestStatus, fetchLotQualityMetrics, fetchLots, fetchNotices } from "../api";
 import { StatusBadge } from "../components/StatusBadge";
-import { IngestRun, Lot, LotQualityMetrics, Notice } from "../types";
+import { IngestRun, IngestStatus, Lot, LotQualityMetrics, Notice } from "../types";
 
 type Metrics = {
   lotsCount: number | null;
   noticesCount: number | null;
   lastRun: IngestRun | null;
   quality: LotQualityMetrics | null;
+  ingestStatus: IngestStatus | null;
 };
 
-const initialMetrics: Metrics = { lotsCount: null, noticesCount: null, lastRun: null, quality: null };
+const initialMetrics: Metrics = { lotsCount: null, noticesCount: null, lastRun: null, quality: null, ingestStatus: null };
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -31,6 +32,13 @@ function formatPercent(value: number | null): string {
 function formatShare(value: number, total: number): string {
   if (total <= 0) return "—";
   return `${Math.round((value / total) * 100)}%`;
+}
+
+function telegramScopeLabel(codes: string | null | undefined): string {
+  const cleaned = (codes ?? "").trim();
+  if (!cleaned) return "все регионы";
+  if (cleaned === "72") return "только Тюменская область (регион 72)";
+  return `регионы ${cleaned}`;
 }
 
 function qualityItems(quality: LotQualityMetrics | null) {
@@ -77,11 +85,12 @@ export function DashboardPage() {
     async function load() {
       setIsLoading(true);
       try {
-        const [lotsPage, noticesPage, runs, quality, opportunitiesPage] = await Promise.all([
+        const [lotsPage, noticesPage, runs, quality, ingestStatus, opportunitiesPage] = await Promise.all([
           fetchLots({ limit: 5, offset: 0 }),
           fetchNotices({ limit: 5, offset: 0 }),
           fetchIngestRuns(1),
-          fetchLotQualityMetrics("72"),
+          fetchLotQualityMetrics(),
+          fetchIngestStatus(),
           fetchLots({
             limit: 10,
             offset: 0,
@@ -96,6 +105,7 @@ export function DashboardPage() {
           noticesCount: normalizePageTotal(noticesPage) ?? (noticesPage as { total: number }).total,
           lastRun: runs[0] ?? null,
           quality,
+          ingestStatus,
         });
         setRecentNotices(normalizePageItems<Notice>(noticesPage));
         setRecentLots(normalizePageItems<Lot>(lotsPage));
@@ -120,6 +130,10 @@ export function DashboardPage() {
   return (
     <div className="page">
       <h1>Сводка</h1>
+      <p className="page__subtitle">
+        Интерфейс показывает все загруженные регионы. Telegram-оповещения:{" "}
+        {isLoading ? "…" : telegramScopeLabel(metrics.ingestStatus?.telegram_alert_region_codes)}.
+      </p>
 
       {error && <p className="error">{error}</p>}
 
@@ -146,8 +160,8 @@ export function DashboardPage() {
 
       <section className="section">
         <div className="section__header">
-          <h2>Качество данных по Тюменской области</h2>
-          <Link to="/lots?region=72" className="section__more">Лоты региона →</Link>
+          <h2>Качество данных по всей базе</h2>
+          <Link to="/lots" className="section__more">Все лоты →</Link>
         </div>
         {!metrics.quality && !isLoading ? (
           <p className="empty">Метрики качества пока недоступны. Проверьте, что backend запущен и БД создана.</p>
@@ -175,8 +189,8 @@ export function DashboardPage() {
 
       <section className="section">
         <div className="section__header">
-          <h2>Потенциально интересные ИЖС-кандидаты по всей базе</h2>
-          <Link to="/lots?is_izhs=true&sort=discount_to_baseline_desc" className="section__more">Все →</Link>
+          <h2>ИЖС-кандидаты для Telegram-региона 72</h2>
+          <Link to="/lots?region=72&is_izhs=true&sort=discount_to_baseline_desc" className="section__more">Все →</Link>
         </div>
         {opportunityLots.length === 0 && !isLoading ? (
           <p className="empty">Пока нет ИЖС-кандидатов с достаточными данными для baseline.</p>

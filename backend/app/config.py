@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     # Master switch: set false to disable all Telegram sends (ingest still runs).
     telegram_alerts_enabled: bool = True
+    # Empty = Telegram alerts for all regions. MVP demo: UI/DB ingest all regions, Telegram only region 72.
+    telegram_alert_region_codes: str = "72"
     # When true, Telegram alerts are sent only for lots with is_izhs_candidate.
     telegram_alert_only_izhs: bool = False
     # When true, skip Telegram if cadastral_number is empty (after detail ingest).

@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import and_, case, desc, func, select
+from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -480,7 +480,7 @@ def lot_facets(db: Session = Depends(get_db)):
 
 
 @router.get("/lots/quality", response_model=LotQualityMetrics)
-def lot_quality_metrics(region: str | None = "72", db: Session = Depends(get_db)):
+def lot_quality_metrics(region: str | None = None, db: Session = Depends(get_db)):
     filters = [Lot.region == region] if region else []
 
     def count_where(*conditions) -> int:
@@ -571,18 +571,32 @@ def get_lot(lot_id: int, db: Session = Depends(get_db)):
 @router.get("/lots-map", response_model=list[MapPoint])
 def map_points(db: Session = Depends(get_db)):
     rows = db.scalars(
-        select(Lot).where(Lot.latitude.is_not(None), Lot.longitude.is_not(None)).order_by(desc(Lot.updated_at)).limit(5000)
-    ).all()
-    return [
-        MapPoint(
-            lot_id=row.id,
-            title=row.title,
-            status=row.status,
-            latitude=row.latitude,  # type: ignore[arg-type]
-            longitude=row.longitude,  # type: ignore[arg-type]
+        select(Lot)
+        .where(
+            or_(
+                and_(Lot.latitude.is_not(None), Lot.longitude.is_not(None)),
+                and_(Lot.nspd_centroid_latitude.is_not(None), Lot.nspd_centroid_longitude.is_not(None)),
+            )
         )
-        for row in rows
-    ]
+        .order_by(desc(Lot.updated_at))
+        .limit(5000)
+    ).all()
+    points: list[MapPoint] = []
+    for row in rows:
+        latitude = row.nspd_centroid_latitude if row.nspd_centroid_latitude is not None else row.latitude
+        longitude = row.nspd_centroid_longitude if row.nspd_centroid_longitude is not None else row.longitude
+        if latitude is None or longitude is None:
+            continue
+        points.append(
+            MapPoint(
+                lot_id=row.id,
+                title=row.title,
+                status=row.status,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        )
+    return points
 
 
 @router.get("/ingest-runs", response_model=list[IngestRunView])
@@ -603,6 +617,8 @@ def get_ingest_status():
         fetch_notice_details=settings.ingest_fetch_notice_details,
         detail_max_per_run=settings.ingest_detail_max_per_run,
         target_region_codes=settings.target_region_codes,
+        ingest_only_land_lots=settings.ingest_only_land_lots,
+        telegram_alert_region_codes=settings.telegram_alert_region_codes,
         telegram_digest_enabled=settings.telegram_digest_enabled,
         telegram_digest_interval_minutes=settings.telegram_digest_interval_minutes,
         telegram_digest_next_at=ingest_scheduler.next_telegram_digest_at(),

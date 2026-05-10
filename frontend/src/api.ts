@@ -139,7 +139,7 @@ export function fetchLotFacets(): Promise<LotFacets> {
   return request<LotFacets>("/api/lots/facets");
 }
 
-export function fetchLotQualityMetrics(region = "72"): Promise<LotQualityMetrics> {
+export function fetchLotQualityMetrics(region?: string): Promise<LotQualityMetrics> {
   return request<LotQualityMetrics>("/api/lots/quality", { region });
 }
 

@@ -4,6 +4,8 @@
 
 Система загружает данные ГИС Торги, сохраняет данные в локальную БД SQLite (на этапе разработки), предоставляет API, отображает список лотов и поддерживает Telegram-оповещения. Продуктовый контракт MVP описан в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
 
+Для MVP-показа рекомендуемый режим такой: ingest и интерфейс работают по всем регионам (`TARGET_REGION_CODES=`), а Telegram-оповещения ограничены Тюменской областью (`TELEGRAM_ALERT_REGION_CODES=72`).
+
 ## Текущий режим разработки
 
 Сейчас проект работает в dev-режиме на локальной SQLite:
@@ -142,17 +144,19 @@ alembic current
 - `GET /health` - проверка доступности.
 - `GET /api/lots` - страница лотов: JSON `{ items, total, limit, offset }` с фильтрами `region/status/municipality/category/is_izhs/has_cadastral/has_price_per_sotka/has_positive_discount/...`, пагинацией `limit`/`offset`, сортировкой `sort` (`updated_at_desc`, `price_per_sotka_asc`, `price_per_sotka_desc`, `discount_to_baseline_desc`). В элементах: `notice_reg_num`, `notice_lot_number`, `notice_lot_count` для стабильной привязки multi-lot извещений, `start_price_per_sotka`, `start_price_per_sqm` (из извещения), `baseline_price_per_sotka`, `discount_to_baseline`, `valuation_confidence` (внутренний baseline по загруженным торгам, не рыночная оценка), `nspd_map_url` при наличии кадастра. Если НСПД-обогащение нашло `card_id/card_type` и центроид, URL ведёт прямо в карточку участка через `selectedCard`; иначе открывает карту с кадастром в query и, при наличии центроида, с нужным zoom/координатами. `pkk_map_url` — поиск на ПКК Росреестра по кадастру. `domclick_map_url` при наличии координат/НСПД-центроида ведёт на карту Домклик вокруг участка (`offer_type=lot`, bbox `sw/ne`, радиус `MARKETPLACE_MAP_RADIUS_KM`). Текстовый поиск Домклик (`domclick_search_url`, `domclick_search_url_cadastral`) включается через `INCLUDE_MARKETPLACE_SEARCH_URLS=true` (по умолчанию выключен).
 - `GET /api/export/lots.csv` - выгрузка CSV с теми же фильтрами, `sort` и baseline-колонками, параметр `max_rows` (по умолчанию 10000, макс. 50000).
-- `GET /api/lots/quality?region=72` - метрики качества данных для Dashboard: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline, НСПД с данными, центроид для карты.
+- `GET /api/lots/quality` - метрики качества данных для Dashboard по всей базе; можно передать `region=72`, чтобы сузить расчёт до Тюменской области: ИЖС-кандидаты, доля с муниципалитетом/кадастром/площадью/ценой/baseline, НСПД с данными, центроид для карты.
 - `GET /api/lots/{id}` - карточка лота.
 - `GET /api/lots-map` - точки лотов для карты.
 - `GET /api/ingest-runs` - история запусков загрузчика с диагностикой файлов: `processed_files`, `failed_files`, `last_error_source_url`, `error_kind`.
-- `GET /api/ingest-status` - текущее состояние ingest: идёт ли загрузка, включён ли планировщик, следующий запуск, интервал и текущая область ingest (`target_region_codes`; пусто означает все регионы).
+- `GET /api/ingest-status` - текущее состояние ingest: идёт ли загрузка, включён ли планировщик, следующий запуск, интервал, текущая область ingest (`target_region_codes`; пусто означает все регионы), включён ли land-filter и какие регионы разрешены для Telegram (`telegram_alert_region_codes`).
 - `POST /api/ingest-runs/start` - ручной запуск operational ingest в фоне; если загрузка уже идёт, возвращает `started=false`.
 - `GET /api/opendata-notices` - страница извещений: JSON `{ items, total, limit, offset }` с фильтрами `document_type/bidd_type_code/reg_num`, пагинацией `limit`/`offset` и серверной сортировкой `sort` (`publish_date_desc`, `publish_date_asc`, `reg_num_asc`, `reg_num_desc`, `document_type_asc`, `document_type_desc`, `bidd_type_code_asc`, `bidd_type_code_desc`).
 
 ## Telegram-алерты
 
-После ingest при событиях `new_lot` / `changed_lot` backend может отправить компактную карточку в Telegram: вердикт, причина попадания, `regNum + lotNumber`, кадастр, земля, цена за сотку, baseline и ссылки на монитор, конкретный лот ГИС Торги `/new/public/lots/lot/{regNum}_{lotNumber}`, отдельное извещение `/new/public/notices/view/{regNum}`, ПКК, НСПД-карту/deep link, карту Домклик вокруг участка при наличии координат и сырой JSON извещения. Расширенный текстовый поиск Домклик опционален через `INCLUDE_MARKETPLACE_SEARCH_URLS=true`; в MVP он выключен по умолчанию (капча/пустая выдача).
+После ingest при событиях `new_lot` / изменении цены существующего лота backend может отправить компактную карточку в Telegram: вердикт, причина попадания, `regNum + lotNumber`, кадастр, земля, цена за сотку, baseline и ссылки на монитор, конкретный лот ГИС Торги `/new/public/lots/lot/{regNum}_{lotNumber}`, отдельное извещение `/new/public/notices/view/{regNum}`, ПКК, НСПД-карту/deep link, карту Домклик вокруг участка при наличии координат и сырой JSON извещения. Расширенный текстовый поиск Домклик опционален через `INCLUDE_MARKETPLACE_SEARCH_URLS=true`; в MVP он выключен по умолчанию (капча/пустая выдача).
+
+`TELEGRAM_ALERT_REGION_CODES=72` означает, что Telegram получает только лоты Тюменской области, даже если база и интерфейс показывают все регионы. В каждое сообщение добавляется примечание: «Оповещения Telegram настроены только на Тюменскую область (регион 72).»
 
 1. Создайте бота в [@BotFather](https://t.me/BotFather), получите `TELEGRAM_BOT_TOKEN`.
 2. Узнайте `TELEGRAM_CHAT_ID`: для личного чата напишите боту `/start`, затем используйте [@userinfobot](https://t.me/userinfobot) или `getUpdates` у Bot API; для канала добавьте бота администратором, id обычно вида `-100...`.
@@ -168,7 +172,7 @@ alembic current
 - `TELEGRAM_ALERTS_ENABLED=true`, заданы `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`; при обслуживании БД без шума можно временно выставить `false`.
 - Если `send_telegram_test.py` падает на `ConnectTimeout` к `api.telegram.org`, задайте `TELEGRAM_PROXY_URL` или передайте разово `--proxy-url http://127.0.0.1:7890`, затем повторите smoke.
 - `APP_PUBLIC_BASE_URL` — публичный URL SPA для ссылки «Монитор» в алерте.
-- Хост с маршрутом к `torgi.gov.ru` (часто нужен IP в РФ); при необходимости `TARGET_REGION_CODES` для сужения объёма.
+- Хост с маршрутом к `torgi.gov.ru` (часто нужен IP в РФ). Для MVP-показа всех регионов оставьте `TARGET_REGION_CODES=` пустым; для Telegram-фокуса по Тюменской области используйте `TELEGRAM_ALERT_REGION_CODES=72`.
 - Опционально `NSPD_ENABLED=true` на той же машине, если доступен `nspd.gov.ru`; политики слияния `NSPD_MERGE_*` — в `.env.example`. Для локального split tunneling с self-signed TLS цепочкой можно временно ставить `NSPD_VERIFY_TLS=false`, после чего `domclick_map_url` начнёт появляться у лотов с найденным центроидом.
 - Умный поток: `TELEGRAM_ALERT_SKIP_LOW_SIGNAL`, `TELEGRAM_ALERT_MIN_DISCOUNT_TO_BASELINE`, `TELEGRAM_ALERT_REQUIRE_BASELINE_FOR_DISCOUNT`, `TELEGRAM_ALERT_REQUIRE_CADASTRAL`, `TELEGRAM_ALERT_ONLY_IZHS` — комбинируйте по сценарию. `TELEGRAM_ALERT_SKIP_LOW_SIGNAL=true` убирает сообщения без практического сигнала: не ИЖС, нет кадастра, нет цены за сотку/baseline. Для самого тихого MVP-потока обычно включают ИЖС + кадастр + минимальный дисконт, а baseline-required включают только когда база уже достаточно наполнена.
 

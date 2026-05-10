@@ -34,6 +34,7 @@ def test_notify_lot_event_sends_html_with_links(monkeypatch, db_session):
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_only_izhs", False)
     monkeypatch.setattr("app.services.alerts.service.settings.app_public_base_url", "https://app.example")
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", True)
@@ -90,7 +91,44 @@ def test_notify_lot_event_sends_html_with_links(monkeypatch, db_session):
     assert "query=72:01:1:1" in sent["text"]
     assert "Домклик" in sent["text"]
     assert "offer_type=lot" in sent["text"]
+    assert "Оповещения Telegram настроены только на Тюменскую область (регион 72)." in sent["text"]
     assert sent["kwargs"].get("disable_web_page_preview") is True
+
+
+def test_notify_skips_lot_outside_telegram_region(monkeypatch, db_session):
+    sent: dict = {}
+
+    async def capture_send(*a, **kw):
+        sent["hit"] = True
+
+    monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alerts_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
+
+    db = db_session()
+    org = Organizer(source_id="o-region", name="Org")
+    db.add(org)
+    db.flush()
+    lot = Lot(
+        source_id="outside-region",
+        title="Участок вне Telegram региона",
+        region="86",
+        organizer_id=org.id,
+        cadastral_number="86:01:1:1",
+        area_sqm=1000.0,
+        start_price=100_000.0,
+        is_izhs_candidate=True,
+        source_url="https://torgi.gov.ru/x.json",
+    )
+    db.add(lot)
+    db.commit()
+    lot_row = db.scalar(select(Lot).where(Lot.source_id == "outside-region"))
+    asyncio.run(notify_lot_event(db, lot_row, "new_lot", "outside-region"))
+    db.close()
+
+    assert "hit" not in sent
 
 
 def test_notify_skipped_when_telegram_disabled(monkeypatch, db_session):
@@ -243,6 +281,7 @@ def test_notify_low_signal_can_be_forced_for_debug(monkeypatch, db_session):
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alerts_enabled", True)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_skip_low_signal", False)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
 
@@ -285,6 +324,7 @@ def test_notify_skipped_when_discount_below_min(monkeypatch, db_session):
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -296,6 +336,7 @@ def test_notify_skipped_when_discount_below_min(monkeypatch, db_session):
     lot = Lot(
         source_id="s3",
         title="L",
+        region="72",
         organizer_id=org.id,
         is_izhs_candidate=False,
         source_url="https://torgi.gov.ru/x.json",
@@ -320,6 +361,7 @@ def test_notify_sent_when_discount_meets_min(monkeypatch, db_session):
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -332,6 +374,7 @@ def test_notify_sent_when_discount_meets_min(monkeypatch, db_session):
     lot = Lot(
         source_id="s4",
         title="L",
+        region="72",
         organizer_id=org.id,
         is_izhs_candidate=False,
         source_url="https://torgi.gov.ru/x.json",
@@ -356,6 +399,7 @@ def test_notify_skipped_when_min_discount_requires_missing_baseline(monkeypatch,
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", 0.1)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_require_baseline_for_discount", True)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
@@ -368,6 +412,7 @@ def test_notify_skipped_when_min_discount_requires_missing_baseline(monkeypatch,
     lot = Lot(
         source_id="s6",
         title="L",
+        region="72",
         organizer_id=org.id,
         is_izhs_candidate=True,
         cadastral_number="72:01:1:3",
@@ -398,6 +443,7 @@ def test_notify_verdict_marks_interesting_izhs_discount(monkeypatch, db_session)
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.lot_valuation", fake_valuation)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_min_discount_to_baseline", None)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
@@ -410,6 +456,7 @@ def test_notify_verdict_marks_interesting_izhs_discount(monkeypatch, db_session)
     lot = Lot(
         source_id="72000000000000005556:lot:2",
         title="ИЖС участок",
+        region="72",
         organizer_id=org.id,
         cadastral_number="72:01:1:2",
         area_sqm=1000.0,
@@ -448,6 +495,7 @@ def test_digest_mode_queues_without_sending(monkeypatch, db_session):
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_digest_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_only_izhs", False)
@@ -490,6 +538,7 @@ def test_flush_digest_sends_and_records_alert_event(monkeypatch, db_session):
 
     monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_digest_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_region_codes", "72")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", False)

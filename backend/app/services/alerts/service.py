@@ -1,5 +1,6 @@
 import hashlib
 import html
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -22,6 +23,8 @@ from app.services.external_lot_links import (
 from app.services.lot_baseline import LotValuation, derived_prices, load_baseline_index, lot_valuation
 from app.services.market_median import load_market_median_stats, valuation_with_market
 from app.services.lot_identity import lot_notice_identity
+
+logger = logging.getLogger(__name__)
 
 
 def _esc_html_text(value: object) -> str:
@@ -48,6 +51,30 @@ def _append_unique_link(
 
 def _yes_no(value: bool) -> str:
     return "да" if value else "нет"
+
+
+def _telegram_alert_region_codes() -> set[str]:
+    return {
+        item.strip()
+        for item in settings.telegram_alert_region_codes.split(",")
+        if item.strip()
+    }
+
+
+def _passes_telegram_region_filter(lot: Lot) -> bool:
+    codes = _telegram_alert_region_codes()
+    if not codes:
+        return True
+    return str(lot.region or "").strip() in codes
+
+
+def _telegram_region_scope_note() -> str | None:
+    codes = sorted(_telegram_alert_region_codes())
+    if not codes:
+        return None
+    if codes == ["72"]:
+        return "Оповещения Telegram настроены только на Тюменскую область (регион 72)."
+    return "Оповещения Telegram настроены только на регионы: " + ", ".join(codes) + "."
 
 
 def _format_number(value: float | None, *, digits: int = 2) -> str:
@@ -82,7 +109,7 @@ def _format_datetime(value: object) -> str:
 def _event_label(event_type: str) -> str:
     return {
         "new_lot": "Новый лот",
-        "changed_lot": "Изменение лота",
+        "changed_lot": "Изменилась цена лота",
     }.get(event_type, event_type)
 
 
@@ -222,6 +249,10 @@ def _is_low_signal_alert(lot: Lot, valuation: LotValuation, start_price_per_sotk
 async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str) -> None:
     if not settings.telegram_alerts_enabled:
         return
+    if not (settings.telegram_bot_token or "").strip() or not (settings.telegram_chat_id or "").strip():
+        return
+    if not _passes_telegram_region_filter(lot):
+        return
     if settings.telegram_alert_only_izhs and not lot.is_izhs_candidate:
         return
     if settings.telegram_alert_require_cadastral and not (lot.cadastral_number or "").strip():
@@ -357,15 +388,22 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
         )
     if nspd_u:
         lines.append("<i>НСПД: если карта не откроет участок автоматически, вставьте кадастровый номер в поиск.</i>")
+    region_note = _telegram_region_scope_note()
+    if region_note:
+        lines.append(f"<i>{_esc_html_text(region_note)}</i>")
 
     message = "\n".join(lines)
-    await send_telegram_message(
-        settings.telegram_bot_token,
-        settings.telegram_chat_id,
-        message,
-        parse_mode="HTML",
-        disable_web_page_preview=settings.telegram_disable_web_page_preview,
-    )
+    try:
+        await send_telegram_message(
+            settings.telegram_bot_token,
+            settings.telegram_chat_id,
+            message,
+            parse_mode="HTML",
+            disable_web_page_preview=settings.telegram_disable_web_page_preview,
+        )
+    except Exception:
+        logger.warning("Telegram alert send failed for lot_id=%s event=%s", lot.id, event_type, exc_info=True)
+        return
     db.add(AlertEvent(lot_id=lot.id, event_type=event_type, event_hash=event_hash))
 
 
@@ -386,10 +424,20 @@ async def flush_telegram_digest(db: Session) -> None:
         f"<i>Событий: {len(rows)}</i>",
         "",
     ]
+    region_note = _telegram_region_scope_note()
+    if region_note:
+        parts.append(f"<i>{_esc_html_text(region_note)}</i>")
+        parts.append("")
+    sent_items: list[TelegramDigestItem] = []
     for item in rows:
         row_lot = db.get(Lot, item.lot_id)
         if not row_lot:
+            db.delete(item)
             continue
+        if not _passes_telegram_region_filter(row_lot):
+            db.delete(item)
+            continue
+        sent_items.append(item)
         valuation = valuation_with_market(row_lot, lot_valuation(row_lot, baseline_index), market_stats)
         per_sotka, _ = derived_prices(row_lot.start_price, row_lot.area_sqm)
         why = _why_interesting_text(row_lot, valuation, per_sotka)
@@ -401,19 +449,27 @@ async def flush_telegram_digest(db: Session) -> None:
         )
         parts.append("")
 
+    if not sent_items:
+        db.commit()
+        return
+
     body = "\n".join(parts).strip()
     max_len = max(500, settings.telegram_max_message_length - 64)
     if len(body) > max_len:
         body = body[:max_len] + "\n<i>…обрезано</i>"
 
-    await send_telegram_message(
-        settings.telegram_bot_token,
-        settings.telegram_chat_id,
-        body,
-        parse_mode="HTML",
-        disable_web_page_preview=settings.telegram_disable_web_page_preview,
-    )
-    for item in rows:
+    try:
+        await send_telegram_message(
+            settings.telegram_bot_token,
+            settings.telegram_chat_id,
+            body,
+            parse_mode="HTML",
+            disable_web_page_preview=settings.telegram_disable_web_page_preview,
+        )
+    except Exception:
+        logger.warning("Telegram digest send failed", exc_info=True)
+        return
+    for item in sent_items:
         db.add(AlertEvent(lot_id=item.lot_id, event_type=item.event_type, event_hash=item.event_hash))
         db.delete(item)
     db.commit()

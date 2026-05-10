@@ -6,6 +6,34 @@
 
 ---
 
+## 2026-05-10 - MVP-подготовка: все регионы в UI, Telegram только 72
+
+**Что сделано:** Разделены область загрузки/интерфейса и область Telegram-оповещений. Добавлена настройка `TELEGRAM_ALERT_REGION_CODES` (default `72`): база и интерфейс могут работать по всем регионам при пустом `TARGET_REGION_CODES`, а Telegram отправляет только разрешённые регионы. В Telegram-сообщения и digest добавлено примечание о фильтре Тюменской области; `changed_lot` теперь отправляется только при изменении цены (`start_price` / `current_price`), а не при любом изменении snapshot. Ошибки отправки Telegram больше не валят ingest.
+
+**UI/API:** `/api/ingest-status` теперь возвращает `ingest_only_land_lots` и `telegram_alert_region_codes`; страница `/ingest` показывает, что интерфейс/БД идут по всем регионам или по фильтру, а Telegram — отдельно. Dashboard считает качество по всей базе, подписывает, что интерфейс показывает все регионы, и оставляет отдельный shortlist для Telegram-региона 72. `/api/lots-map` и встроенная карта карточки используют fallback на `nspd_centroid_*`, поэтому лоты с НСПД-центроидом попадают на карту.
+
+**Документация:** Обновлены `.env.example`, `README.md`, `docs/MVP_PRODUCT_CONTRACT.md`, `AGENTS.md`: для MVP-показа рекомендовано `TARGET_REGION_CODES=` и `TELEGRAM_ALERT_REGION_CODES=72`.
+
+**Проверки:** `python -m pytest -q` в `backend` — 117 passed; `npx.cmd tsc --noEmit` — ok; `npm.cmd run test -- --run` — 3 passed; `npm.cmd run build` — ok, с прежним предупреждением Vite о крупном lazy chunk карты.
+
+**Нужно вручную в окружении:** Не редактировался реальный `.env`. Перед показом/перезапуском backend нужно выставить `TARGET_REGION_CODES=` (пусто, все регионы в БД/UI) и `TELEGRAM_ALERT_REGION_CODES=72` (Telegram только Тюменская область).
+
+---
+
+## 2026-05-10 - Ревизия кода и логики сервиса
+
+**Что сделано:** Проведена обзорная ревизия backend/frontend без изменения бизнес-кода. Проверены основные контуры: ingest/discovery/detail-parser, multi-lot identity, NSPD enrichment, API `/lots`/`/lots-map`/`/ingest-status`, Telegram alerts/digest, frontend Dashboard/Lots/LotDetail/IngestRuns, миграционная цепочка Alembic.
+
+**Текущее runtime-состояние:** backend на `http://127.0.0.1:8001` отвечает `GET /health`; `/api/lots/quality?region=72`: `total=115`, `izhs_candidates=68`, `with_cadastral=86`, `with_area=115`, `with_price_per_sotka=49`, `with_baseline=49`, `with_positive_discount=24`, `with_nspd_enriched=80`, `with_map_centroid=70`; ingest сейчас не выполняется, планировщик включен.
+
+**Сильные стороны:** пайплайн ingest уже идемпотентный и наблюдаемый; detail-parser покрывает коды ВРИ и текстовые fallback'и; multi-lot извещения имеют стабильную identity; API/UI честно отделяют внутренний baseline от рыночной оценки; Telegram-сообщения содержат рабочие ссылки и фильтры шума; PostgreSQL/Alembic цепочка актуальна, один head `20260511_13_digest_items`.
+
+**Риски / TODO:** `/api/lots-map` и встроенная карта карточки пока используют только `lots.latitude/longitude`, поэтому не показывают лоты с NSPD-центроидом; detail-fetch failures и достижение `INGEST_DETAIL_MAX_PER_RUN` помечают файл как processed, из-за чего часть лотов может остаться без деталей до ручного репроцессинга; сбой Telegram send сейчас может поднять исключение на критическом пути ingest; повторный прогон файла с неподдерживаемой schema version может конфликтовать с уникальным `ingest_manifest(source_url, sha256)`; сортировка/фильтр по дисконту и baseline считаются in-memory; production еще требует auth/ограничение для ручного запуска ingest и реальную интеграцию рыночных аналогов.
+
+**Проверки:** `python -m pytest -q` в `backend` - 115 passed; `npx.cmd tsc --noEmit` в `frontend` - ok; `npm.cmd run test -- --run` - 3 passed; `npm.cmd run build` - ok, с ожидаемым предупреждением Vite о крупном lazy chunk `TradesMap`.
+
+---
+
 ## 2026-05-10 - PostgreSQL schema, backfill, NSPD enrichment и restart backend
 
 **Что сделано:** После проверки новой удалённой БД `app-gis-torgi-alert` применены Alembic-миграции на PostgreSQL. Для совместимости с PostgreSQL/Alembic укорочены revision id двух последних миграций: `20260510_12_notice_identity` и `20260511_13_digest_items`, потому что стандартная колонка `alembic_version.version_num` имеет длину 32 символа.

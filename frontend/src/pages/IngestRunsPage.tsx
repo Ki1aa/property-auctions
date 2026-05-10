@@ -31,6 +31,18 @@ function intervalLabel(minutes: number): string {
   return `раз в ${minutes} мин.`;
 }
 
+function ingestRegionLabel(value: string | undefined): string {
+  const cleaned = (value ?? "").trim();
+  return cleaned ? `только ${cleaned}` : "все регионы";
+}
+
+function telegramRegionLabel(value: string | undefined): string {
+  const cleaned = (value ?? "").trim();
+  if (!cleaned) return "все регионы";
+  if (cleaned === "72") return "только 72 (Тюменская область)";
+  return `только ${cleaned}`;
+}
+
 const errorKindLabels: Record<string, string> = {
   source_unavailable: "Источник недоступен",
   schema_migration_required: "Новая схема",
@@ -172,6 +184,18 @@ export function IngestRunsPage() {
         <div>
           <span className="ingest-status__label">Detail JSON</span>
           <strong>{status?.fetch_notice_details ? `включён, до ${status.detail_max_per_run}` : "выключен"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Регионы в интерфейсе</span>
+          <strong>{status ? ingestRegionLabel(status.target_region_codes) : "—"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Типы лотов</span>
+          <strong>{status?.ingest_only_land_lots ? "земельные участки" : "все типы"}</strong>
+        </div>
+        <div>
+          <span className="ingest-status__label">Telegram-регионы</span>
+          <strong>{status ? telegramRegionLabel(status.telegram_alert_region_codes) : "—"}</strong>
         </div>
         <div>
           <span className="ingest-status__label">Telegram digest</span>

@@ -84,6 +84,14 @@ def _payload_hash(payload: dict) -> str:
     return hashlib.sha256(str(payload).encode("utf-8")).hexdigest()
 
 
+def _price_changed(old: float | None, new: float | None) -> bool:
+    if old is None and new is None:
+        return False
+    if old is None or new is None:
+        return True
+    return float(old) != float(new)
+
+
 def _pick_items(payload):
     if isinstance(payload, list):
         return payload
@@ -761,6 +769,8 @@ async def _upsert_lot(
     lot = db.scalar(select(Lot).where(Lot.source_id == normalized["source_id"]))
     created = False
     old_hash = None
+    old_start_price: float | None = None
+    old_current_price: float | None = None
 
     if lot is None:
         lot = Lot(source_id=normalized["source_id"], title=normalized["title"], organizer_id=organizer.id)
@@ -768,6 +778,8 @@ async def _upsert_lot(
         db.flush()
         created = True
     else:
+        old_start_price = lot.start_price
+        old_current_price = lot.current_price
         snapshot = db.scalar(
             select(LotSnapshot).where(LotSnapshot.lot_id == lot.id).order_by(LotSnapshot.id.desc())
         )
@@ -812,9 +824,13 @@ async def _upsert_lot(
 
     await maybe_enrich_lot_nspd_async(db, lot, nspd_budget)
 
+    price_changed = _price_changed(old_start_price, lot.start_price) or _price_changed(
+        old_current_price,
+        lot.current_price,
+    )
     if created:
         await notify_lot_event(db, lot, "new_lot", f"{lot.source_id}:{new_hash}")
-    elif changed:
+    elif changed and price_changed:
         await notify_lot_event(db, lot, "changed_lot", f"{lot.source_id}:{new_hash}")
     db.commit()
     return changed

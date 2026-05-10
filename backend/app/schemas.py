@@ -127,6 +127,8 @@ class IngestStatusView(BaseModel):
     fetch_notice_details: bool
     detail_max_per_run: int
     target_region_codes: str
+    ingest_only_land_lots: bool = True
+    telegram_alert_region_codes: str = ""
     telegram_digest_enabled: bool = False
     telegram_digest_interval_minutes: int = 30
     telegram_digest_next_at: datetime | None = None

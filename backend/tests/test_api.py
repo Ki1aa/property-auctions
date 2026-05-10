@@ -49,6 +49,18 @@ def test_lots_list_and_map_endpoint():
             longitude=73.0,
         )
     )
+    db.add(
+        Lot(
+            source_id="lot-nspd",
+            title="Лот с НСПД",
+            organizer_id=organizer.id,
+            status="active",
+            region="72",
+            category="ZK",
+            nspd_centroid_latitude=57.1522,
+            nspd_centroid_longitude=65.5272,
+        )
+    )
     db.commit()
     db.close()
 
@@ -58,10 +70,12 @@ def test_lots_list_and_map_endpoint():
 
     assert lots_response.status_code == 200
     lots_body = lots_response.json()
-    assert lots_body["total"] == 1
-    assert len(lots_body["items"]) == 1
+    assert lots_body["total"] == 2
+    assert len(lots_body["items"]) == 2
     assert map_response.status_code == 200
-    assert len(map_response.json()) == 1
+    map_points = map_response.json()
+    assert len(map_points) == 2
+    assert any(item["lot_id"] and item["latitude"] == 57.1522 for item in map_points)
 
 
 def test_lots_filters_izhs_and_area():
@@ -348,6 +362,8 @@ def test_ingest_status_and_manual_start_endpoint(monkeypatch):
     assert status_body["scheduler_running"] is True
     assert status_body["interval_minutes"] >= 1
     assert "target_region_codes" in status_body
+    assert "ingest_only_land_lots" in status_body
+    assert "telegram_alert_region_codes" in status_body
 
     start = client.post("/api/ingest-runs/start")
     assert start.status_code == 200
