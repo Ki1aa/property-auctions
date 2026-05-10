@@ -6,6 +6,70 @@
 
 ---
 
+## 2026-05-10 - PostgreSQL schema, backfill, NSPD enrichment и restart backend
+
+**Что сделано:** После проверки новой удалённой БД `app-gis-torgi-alert` применены Alembic-миграции на PostgreSQL. Для совместимости с PostgreSQL/Alembic укорочены revision id двух последних миграций: `20260510_12_notice_identity` и `20260511_13_digest_items`, потому что стандартная колонка `alembic_version.version_num` имеет длину 32 символа.
+
+**Загрузка данных:** Выполнен backfill закрытого окна `2026-05-01..2026-05-09` с `TELEGRAM_ALERTS_ENABLED=false`, `TARGET_REGION_CODES=72`, `INGEST_ONLY_LAND_LOTS=true`, `INGEST_DETAIL_MAX_PER_RUN=1000`. Результат: `fetched_count=8670`, `upserted_count=118`, `changed_count=118`, `processed_files=10`, `failed_files=0`.
+
+**НСПД:** Dry-run `--limit 5` прошёл `matched=5/5`; применено обогащение по региону 72: `selected=86`, `matched=80`, `failed=6` (`http=6`). После enrichment в БД: `with_nspd_enriched=80`, `with_map_centroid=70`, `with_nspd_card=80`.
+
+**Итоговые метрики PostgreSQL:** `lots=115`, `opendata_notices=108`, `ingest_manifest=10`, `ingest_runs=1`, `alert_events=0`, `telegram_digest_items=0`, `izhs_candidates=68`, `with_cadastral=86`, `category=ZK` для всех лотов, keyword-проверка авто/древесины/помещений/транспорта — 0 совпадений.
+
+**Runtime:** Старый backend на 8001 остановлен, затем backend перезапущен на `http://127.0.0.1:8001` уже с PostgreSQL `.env` и переменными `TARGET_REGION_CODES=72`, `INGEST_ONLY_LAND_LOTS=true`, `NSPD_VERIFY_TLS=false`; frontend продолжает отвечать на `http://127.0.0.1:5173`.
+
+**Проверки:** `GET /health`, `GET /api/ingest-status`, `GET /api/lots/quality`, `GET /api/lots?limit=1&has_cadastral=true`, `GET /` frontend — ok. Визуально проверены `/`, `/lots`; консоль браузера без ошибок, ссылки `ГИС лот`/`Извещение`/`ПКК`/`НСПД`/`Домклик` отображаются. `python -m pytest -q` в `backend`: 115 passed. `npx.cmd tsc --noEmit` в `frontend`: ok.
+
+**Известные проблемы / TODO:** Dashboard shortlist всё ещё показывает ИЖС-кандидатов с отрицательным дисконтом; стоит либо фильтровать только `has_positive_discount=true`, либо переименовать блок в «ИЖС с рассчитанным baseline».
+
+---
+
+## 2026-05-10 - Проверка удалённой PostgreSQL после смены DATABASE_URL
+
+**Что сделано:** Повторно проверена свежая конфигурация `.env` без вывода секрета. `DATABASE_URL` теперь указывает на существующую БД `app-gis-torgi-alert` через `postgresql+psycopg`.
+
+**Результат проверки:** подключение к PostgreSQL проходит (`PostgreSQL 16.13`, schema `public`, `select 1` ok). База пустая: `tables_count=0`, отсутствуют `alembic_version`, `lots`, `opendata_notices`, `ingest_manifest`, `ingest_runs`, `alert_events`, `telegram_digest_items`, `market_comparables`.
+
+**Текущий runtime:** уже запущенный backend на `http://127.0.0.1:8001` всё ещё отвечает и показывает прежние 115 лотов, но это старый процесс/старая БД в памяти процесса; его ответы не подтверждают работу новой PostgreSQL-БД.
+
+**TODO:** Выполнить `python -m alembic upgrade head` на новой БД, затем перезапустить backend и загрузить данные/backfill уже в PostgreSQL.
+
+---
+
+## 2026-05-10 - Повторная проверка удалённой PostgreSQL-БД
+
+**Что сделано:** Повторно проверена текущая строка `DATABASE_URL` без вывода секрета. Схема драйвера теперь корректная: `postgresql+psycopg`.
+
+**Результат проверки:** целевая БД из `.env` (`gis-torgi-alert`) по-прежнему отсутствует на сервере. Через служебную БД `postgres` найдена похожая существующая база `app-gis-torgi-alert`; подключение к ней проходит, но она пустая: нет `alembic_version`, `lots`, `opendata_notices`, `ingest_manifest`, `ingest_runs`, `alert_events`, `telegram_digest_items`, `market_comparables`.
+
+**Права:** пользователь не имеет `CREATEDB`, но в базе `app-gis-torgi-alert` имеет `USAGE/CREATE` для schema `public` и право `CREATE` в базе, то есть миграции схемы должны иметь возможность создать таблицы.
+
+**TODO:** Либо создать на сервере БД `gis-torgi-alert`, либо изменить имя БД в `DATABASE_URL` на `app-gis-torgi-alert`, затем выполнить `alembic upgrade head` и перезапустить backend уже с новой БД.
+
+---
+
+## 2026-05-10 - Проверка подключения к удалённой PostgreSQL-БД
+
+**Что сделано:** Проверена новая конфигурация `DATABASE_URL` без вывода секрета из `.env`. Текущий уже запущенный backend на 8001 продолжает отвечать, но новая конфигурация при свежем подключении пока неработоспособна.
+
+**Результат проверки:** строка подключения указывает на PostgreSQL и сервер доступен через служебную БД `postgres`; драйвер `psycopg` v3 установлен. При подключении к целевой БД сервер возвращает `database does not exist`. У текущего пользователя нет права `CREATEDB`, поэтому создать базу с этой учётной записью нельзя.
+
+**Известные проблемы / TODO:** В `DATABASE_URL` нужно использовать схему `postgresql+psycopg://...`, как в README/`.env.example`; схема `postgresql://...` заставляет SQLAlchemy искать `psycopg2`. На сервере нужно создать целевую БД или указать существующую, затем выполнить `alembic upgrade head` и перезапустить backend.
+
+---
+
+## 2026-05-10 - Проверка состояния сервиса и dev-перезапуск backend на 8001
+
+**Что сделано:** Проверено текущее состояние ветки `codex/gis_torgi_v2`: рабочее дерево чистое, ветка синхронизирована с `origin/codex/gis_torgi_v2` на коммите `49778ed`. Проверены live API и UI: frontend отвечает на `http://127.0.0.1:5173`, актуальный backend поднят на `http://127.0.0.1:8001` из-за прежней проблемы с портом 8000. Backend перезапущен на 8001 с `TARGET_REGION_CODES=72`, `INGEST_ONLY_LAND_LOTS=true`, `NSPD_VERIFY_TLS=false`; `/api/ingest-status` подтверждает `target_region_codes=72`, сам land-filter проверен через settings.
+
+**Метрики dev-БД:** `lots=115`, `izhs_candidates=68`, `with_cadastral=86`, `with_nspd_enriched=80`, `with_map_centroid=70`, `with_notice_identity=115`; `market_comparables=0`, `alert_events=0`, `telegram_digest_items=0`.
+
+**Проверки:** `GET /health`, `GET /api/ingest-status`, `GET /api/lots/quality`, `GET /api/lots?limit=1&has_cadastral=true`, `GET /` frontend; визуально проверены страницы `/`, `/lots`, `/ingest` без ошибок консоли. `python -m pytest` в `backend`: 115 passed. `npx.cmd tsc --noEmit` в `frontend`: ok.
+
+**Известные проблемы / TODO:** `/api/ingest-status` не показывает `ingest_only_land_lots`, хотя настройка есть и применяется; Dashboard-блок «Потенциально интересные ИЖС-кандидаты» сейчас выводит ИЖС с любым baseline, а в текущей БД ИЖС с положительным дисконтом нет, поэтому текст/фильтр блока нужно уточнить.
+
+---
+
 ## 2026-05-10 - Push в GitHub: ветка codex/gis_torgi_v2
 
 **Что сделано:** Закоммичены накопленные изменения (ПКК/НСПД, Домклик, Telegram-алерты, демо-скрипт, UI/API/тесты/доки) и выполнен `git push origin codex/gis_torgi_v2` (`5394c44..e1d45b4`).
