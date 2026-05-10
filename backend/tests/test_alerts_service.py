@@ -79,18 +79,17 @@ def test_notify_lot_event_sends_html_with_links(monkeypatch, db_session):
     assert "ГИС: извещение 72000000000000005555" in sent["text"]
     assert "Сигналы:" in sent["text"]
     assert "ИЖС: нет" in sent["text"]
-    assert "Baseline считается по уже загруженным торгам" in sent["text"]
+    assert "Baseline считается по уже загруженным торгам, это ещё не рыночная оценка по объявлениям." in sent["text"]
     assert "Test &lt;lot&gt;" in sent["text"]
     assert "Street &amp; Co" in sent["text"]
     assert "https://app.example/lots/" in sent["text"]
     assert "torgi.gov.ru" in sent["text"]
-    assert "pkk.rosreestr.ru" not in sent["text"]
-    assert "НСПД карта" in sent["text"]
+    assert "nspd.gov.ru/map" in sent["text"]
+    assert "НСПД (ФГИС ЕГРН)" in sent["text"]
     assert "https://nspd.gov.ru/map?thematic=PKK" in sent["text"]
     assert "query=72:01:1:1" in sent["text"]
-    assert "Домклик (карта района)" in sent["text"]
+    assert "Домклик" in sent["text"]
     assert "offer_type=lot" in sent["text"]
-    assert "cian.ru" in sent["text"]
     assert sent["kwargs"].get("disable_web_page_preview") is True
 
 
@@ -157,6 +156,43 @@ def test_notify_skipped_when_require_cadastral(monkeypatch, db_session):
     asyncio.run(notify_lot_event(db, lot_row, "new_lot", "p2"))
     db.commit()
     db.close()
+    assert "hit" not in sent
+
+
+def test_notify_skips_lot_with_price_per_sotka_but_no_gis_notice(monkeypatch, db_session):
+    sent: dict = {}
+
+    async def capture_send(*a, **kw):
+        sent["hit"] = True
+
+    monkeypatch.setattr("app.services.alerts.service.send_telegram_message", capture_send)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alerts_enabled", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_skip_low_signal", True)
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_bot_token", "t")
+    monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
+
+    db = db_session()
+    org = Organizer(source_id="o-garbage", name="Org")
+    db.add(org)
+    db.flush()
+    lot = Lot(
+        source_id="manual-test-no-reg",
+        title="Тестовый лот",
+        region="86",
+        organizer_id=org.id,
+        cadastral_number=None,
+        area_sqm=1000.0,
+        start_price=10.0,
+        is_izhs_candidate=False,
+        source_url="https://torgi.gov.ru/x.json",
+    )
+    db.add(lot)
+    db.commit()
+    lot_row = db.scalar(select(Lot).where(Lot.source_id == "manual-test-no-reg"))
+    asyncio.run(notify_lot_event(db, lot_row, "new_lot", "p-garbage"))
+    db.commit()
+    db.close()
+
     assert "hit" not in sent
 
 
@@ -417,7 +453,6 @@ def test_digest_mode_queues_without_sending(monkeypatch, db_session):
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_alert_only_izhs", False)
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", False)
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_map_urls", False)
-    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_quick_links", False)
     monkeypatch.setattr("app.services.alerts.service.settings.app_public_base_url", "")
 
     db = db_session()
@@ -459,7 +494,6 @@ def test_flush_digest_sends_and_records_alert_event(monkeypatch, db_session):
     monkeypatch.setattr("app.services.alerts.service.settings.telegram_chat_id", "1")
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_search_urls", False)
     monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_map_urls", False)
-    monkeypatch.setattr("app.services.alerts.service.settings.include_marketplace_quick_links", False)
     monkeypatch.setattr("app.services.alerts.service.settings.app_public_base_url", "")
 
     from app.models import AlertEvent

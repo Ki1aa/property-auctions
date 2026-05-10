@@ -65,17 +65,13 @@ class Settings(BaseSettings):
     telegram_digest_interval_minutes: int = 30
     # Base URL of the SPA (no trailing slash), e.g. https://monitor.example.com — for Telegram and API deep links.
     app_public_base_url: str = ""
-    # Best-effort Domclick/Avito/Cian search URLs from cadastral/address; off by default because they can return captcha/empty results.
+    # Best-effort Domclick text search from cadastral/address; off by default (captcha/empty results possible).
     include_marketplace_search_urls: bool = False
-    # Minimal always-visible aggregator links by cadastral/region; no scraping, just manual lookup entry points.
-    include_marketplace_quick_links: bool = True
     # Map links around a known lot centroid; useful for manual analog inspection and does not scrape aggregators.
     include_marketplace_map_urls: bool = True
     marketplace_map_radius_km: float = 5.0
-    # Marketplace listing search templates; `{q}` is replaced with URL-encoded query (see external_lot_links).
+    # Domclick listing search template; `{q}` is replaced with URL-encoded query (see external_lot_links).
     domclick_search_template: str = "https://domclick.ru/search?query={q}"
-    avito_land_search_template: str = "https://www.avito.ru/all/zemelnye_uchastki?q={q}"
-    cian_land_search_template: str = "https://www.cian.ru/kupit-zemelniy-uchastok/?text={q}"
 
     # NSPD geoportal (nspd.gov.ru). Off by default; enable when server has route to RU endpoints.
     nspd_enabled: bool = False

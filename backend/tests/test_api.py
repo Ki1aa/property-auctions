@@ -487,7 +487,6 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
     from sqlalchemy import select
 
     monkeypatch.setattr("app.services.external_lot_links.settings.include_marketplace_search_urls", False)
-    monkeypatch.setattr("app.services.external_lot_links.settings.include_marketplace_quick_links", True)
     TestingSessionLocal = _setup_inmemory_app()
 
     db = TestingSessionLocal()
@@ -554,19 +553,13 @@ def test_lot_detail_returns_notice_payload_when_linked(monkeypatch):
         "https://nspd.gov.ru/map?thematic=PKK&theme_id=1&baseLayerId=235&"
         "is_copy_url=true&query=72:01:0000000:1"
     )
-    assert body["pkk_map_url"] is None
+    assert body["pkk_map_url"] == (
+        "https://nspd.gov.ru/map?thematic=PKK&theme_id=1&baseLayerId=235&"
+        "is_copy_url=true&query=72:01:0000000:1"
+    )
     assert body["domclick_map_url"] is None
     assert body["domclick_search_url"] is None
     assert body["domclick_search_url_cadastral"] is None
-    assert body["avito_search_url"] is None
-    assert body["avito_search_url_cadastral"] == (
-        "https://www.avito.ru/tyumen/zemelnye_uchastki?q=72%3A01%3A0000000%3A1"
-    )
-    assert body["cian_search_url"] is None
-    assert body["cian_search_url_cadastral"] == (
-        "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/"
-        "?text=72%3A01%3A0000000%3A1"
-    )
 
 
 def test_lots_list_uses_stored_notice_identity_for_torgi_lot_url():

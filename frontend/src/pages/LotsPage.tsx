@@ -16,8 +16,6 @@ type LotsQueryState = {
   categories: string[];
   isIzhs: boolean;
   hasCadastral: boolean;
-  hasPricePerSotka: boolean;
-  hasPositiveDiscount: boolean;
   minArea: string;
   maxArea: string;
   maxStartPrice: string;
@@ -59,8 +57,6 @@ function queryStateFromSearchParams(params: URLSearchParams): LotsQueryState {
     categories: params.getAll("category"),
     isIzhs: params.get("is_izhs") === "true",
     hasCadastral: params.get("has_cadastral") === "true",
-    hasPricePerSotka: params.get("has_price_per_sotka") === "true",
-    hasPositiveDiscount: params.get("has_positive_discount") === "true",
     minArea: params.get("min_area") ?? "",
     maxArea: params.get("max_area") ?? "",
     maxStartPrice: params.get("max_start_price") ?? "",
@@ -87,8 +83,6 @@ export function LotsPage() {
   const [categories, setCategories] = useState<string[]>(initialQuery.categories);
   const [isIzhs, setIsIzhs] = useState(initialQuery.isIzhs);
   const [hasCadastral, setHasCadastral] = useState(initialQuery.hasCadastral);
-  const [hasPricePerSotka, setHasPricePerSotka] = useState(initialQuery.hasPricePerSotka);
-  const [hasPositiveDiscount, setHasPositiveDiscount] = useState(initialQuery.hasPositiveDiscount);
   const [minArea, setMinArea] = useState(initialQuery.minArea);
   const [maxArea, setMaxArea] = useState(initialQuery.maxArea);
   const [maxStartPrice, setMaxStartPrice] = useState(initialQuery.maxStartPrice);
@@ -121,8 +115,6 @@ export function LotsPage() {
       category: applied.categories.length ? applied.categories : undefined,
       isIzhs: applied.isIzhs ? true : undefined,
       hasCadastral: applied.hasCadastral ? true : undefined,
-      hasPricePerSotka: applied.hasPricePerSotka ? true : undefined,
-      hasPositiveDiscount: applied.hasPositiveDiscount ? true : undefined,
       minArea: optionalNumber(applied.minArea),
       maxArea: optionalNumber(applied.maxArea),
       maxStartPrice: optionalNumber(applied.maxStartPrice),
@@ -148,8 +140,6 @@ export function LotsPage() {
         category: query.categories.length ? query.categories : undefined,
         isIzhs: query.isIzhs ? true : undefined,
         hasCadastral: query.hasCadastral ? true : undefined,
-        hasPricePerSotka: query.hasPricePerSotka ? true : undefined,
-        hasPositiveDiscount: query.hasPositiveDiscount ? true : undefined,
         minArea: optionalNumber(query.minArea),
         maxArea: optionalNumber(query.maxArea),
         maxStartPrice: optionalNumber(query.maxStartPrice),
@@ -174,8 +164,6 @@ export function LotsPage() {
     setCategories(query.categories);
     setIsIzhs(query.isIzhs);
     setHasCadastral(query.hasCadastral);
-    setHasPricePerSotka(query.hasPricePerSotka);
-    setHasPositiveDiscount(query.hasPositiveDiscount);
     setMinArea(query.minArea);
     setMaxArea(query.maxArea);
     setMaxStartPrice(query.maxStartPrice);
@@ -195,8 +183,6 @@ export function LotsPage() {
     }
     if (isIzhs) next.set("is_izhs", "true");
     if (hasCadastral) next.set("has_cadastral", "true");
-    if (hasPricePerSotka) next.set("has_price_per_sotka", "true");
-    if (hasPositiveDiscount) next.set("has_positive_discount", "true");
     if (minArea) next.set("min_area", minArea);
     if (maxArea) next.set("max_area", maxArea);
     if (maxStartPrice) next.set("max_start_price", maxStartPrice);
@@ -357,22 +343,6 @@ export function LotsPage() {
           <label className="checkbox">
             <input type="checkbox" checked={hasCadastral} onChange={(e) => setHasCadastral(e.target.checked)} />
             <span>С кадастром</span>
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={hasPricePerSotka}
-              onChange={(e) => setHasPricePerSotka(e.target.checked)}
-            />
-            <span>С ₽/сотка</span>
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={hasPositiveDiscount}
-              onChange={(e) => setHasPositiveDiscount(e.target.checked)}
-            />
-            <span>С дисконтом</span>
           </label>
         </div>
 

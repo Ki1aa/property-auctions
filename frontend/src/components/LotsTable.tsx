@@ -50,9 +50,6 @@ function nspdStatusLabel(status: string | null | undefined): string {
 }
 
 function LotLinksCell({ lot }: { lot: Lot }) {
-  const avitoUrl = lot.avito_search_url_cadastral || lot.avito_search_url;
-  const cianUrl = lot.cian_search_url_cadastral || lot.cian_search_url;
-
   return (
     <div className="lots-table__links">
       <Link to={`/lots/${lot.id}`} className="button button--compact lots-table__open-link">
@@ -68,19 +65,37 @@ function LotLinksCell({ lot }: { lot: Lot }) {
           Извещение
         </a>
       ) : null}
+      {lot.pkk_map_url ? (
+        <a
+          className="lots-table__ext-link"
+          href={lot.pkk_map_url}
+          target="_blank"
+          rel="noreferrer"
+          title="Публичная кадастровая карта (НСПД), поиск по кадастру"
+        >
+          ПКК
+        </a>
+      ) : null}
+      {lot.nspd_map_url && lot.nspd_map_url !== lot.pkk_map_url ? (
+        <a
+          className="lots-table__ext-link"
+          href={lot.nspd_map_url}
+          target="_blank"
+          rel="noreferrer"
+          title="Карта НСПД: участок / центроид при обогащении"
+        >
+          НСПД
+        </a>
+      ) : null}
       {lot.domclick_map_url ? (
-        <a className="lots-table__ext-link" href={lot.domclick_map_url} target="_blank" rel="noreferrer">
+        <a
+          className="lots-table__ext-link"
+          href={lot.domclick_map_url}
+          target="_blank"
+          rel="noreferrer"
+          title="Домклик: карта объявлений об участках в округе"
+        >
           Домклик
-        </a>
-      ) : null}
-      {avitoUrl ? (
-        <a className="lots-table__ext-link" href={avitoUrl} target="_blank" rel="noreferrer">
-          Авито
-        </a>
-      ) : null}
-      {cianUrl ? (
-        <a className="lots-table__ext-link" href={cianUrl} target="_blank" rel="noreferrer">
-          Циан
         </a>
       ) : null}
     </div>

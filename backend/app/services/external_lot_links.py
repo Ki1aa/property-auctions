@@ -1,4 +1,4 @@
-"""Deep links for lots: GIS Torgi, NSPD map, app SPA, marketplace search."""
+"""Deep links for lots: GIS Torgi, NSPD map, app SPA, Domclick search/map."""
 
 from __future__ import annotations
 
@@ -19,43 +19,15 @@ NSPD_MAP_BASE_PARAMS = {
     "baseLayerId": "235",
     "is_copy_url": "true",
 }
-DOMCLICK_HOST_BY_REGION = {
-    "72": "tyumen.domclick.ru",
-    "86": "xanty-mansijsk.domclick.ru",
-    "89": "salekhard.domclick.ru",
-}
-AVITO_LAND_SEARCH_TEMPLATE_BY_REGION = {
-    "72": "https://www.avito.ru/tyumen/zemelnye_uchastki?q={q}",
-    "77": "https://www.avito.ru/moskva/zemelnye_uchastki?q={q}",
-    "78": "https://www.avito.ru/sankt-peterburg/zemelnye_uchastki?q={q}",
-    "50": "https://www.avito.ru/moskovskaya_oblast/zemelnye_uchastki?q={q}",
-    "47": "https://www.avito.ru/leningradskaya_oblast/zemelnye_uchastki?q={q}",
-    "23": "https://www.avito.ru/krasnodar/zemelnye_uchastki?q={q}",
-    "66": "https://www.avito.ru/ekaterinburg/zemelnye_uchastki?q={q}",
-    "54": "https://www.avito.ru/novosibirsk/zemelnye_uchastki?q={q}",
-    "24": "https://www.avito.ru/krasnoyarsk/zemelnye_uchastki?q={q}",
-    "61": "https://www.avito.ru/rostov-na-donu/zemelnye_uchastki?q={q}",
-    "16": "https://www.avito.ru/kazan/zemelnye_uchastki?q={q}",
-    "86": "https://www.avito.ru/hanty-mansiysk/zemelnye_uchastki?q={q}",
-    "89": "https://www.avito.ru/salehard/zemelnye_uchastki?q={q}",
-}
-CIAN_LAND_SEARCH_TEMPLATE_BY_REGION = {
-    "72": "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/?text={q}",
-    "77": "https://www.cian.ru/kupit-zemelniy-uchastok-moskva/?text={q}",
-    "78": "https://spb.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "50": "https://www.cian.ru/kupit-zemelniy-uchastok-moskovskaya-oblast/?text={q}",
-    "47": "https://www.cian.ru/kupit-zemelniy-uchastok-leningradskaya-oblast/?text={q}",
-    "23": "https://krasnodar.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "66": "https://ekaterinburg.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "54": "https://novosibirsk.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "24": "https://krasnoyarsk.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "61": "https://rostov.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "16": "https://kazan.cian.ru/kupit-zemelniy-uchastok/?text={q}",
-    "86": "https://www.cian.ru/kupit-zemelniy-uchastok-hanty-mansijskij-avtonomnyj-okrug/?text={q}",
-    "89": "https://www.cian.ru/kupit-zemelniy-uchastok-jamalo-neneckij-avtonomnyj-okrug/?text={q}",
-}
 
 
+def _normalize_torgi_https(url: str | None) -> str | None:
+    u = (url or "").strip()
+    if not u:
+        return None
+    if u.startswith("http://torgi.gov.ru"):
+        return "https://" + u[len("http://") :]
+    return u
 def _notice_reg_number(lot: Lot, notice_payload: dict | None) -> str | None:
     return lot_notice_identity(lot, notice_payload=notice_payload).reg_num
 
@@ -84,6 +56,7 @@ def _official_notice_href(notice_payload: dict | None) -> str | None:
 
     for raw in candidates:
         href = str(raw or "").strip()
+        href = _normalize_torgi_https(href) or href
         if href.startswith("https://torgi.gov.ru/new/public/notices/view/"):
             return href
         if href.startswith("/new/public/notices/view/"):
@@ -93,7 +66,7 @@ def _official_notice_href(notice_payload: dict | None) -> str | None:
 
 def torgi_notice_json_url(lot: Lot) -> str | None:
     """OpenData / notice detail JSON URL (href)."""
-    return (lot.notice_detail_url or lot.source_url or "").strip() or None
+    return _normalize_torgi_https(lot.notice_detail_url or lot.source_url)
 
 
 def torgi_notice_html_url(lot: Lot, notice_payload: dict | None = None) -> str | None:
@@ -154,11 +127,6 @@ def torgi_notice_json_link_when_distinct(
     return None
 
 
-def pkk_map_url(cadastral_number: str | None) -> str | None:
-    """Legacy PKK deep links are intentionally disabled: the service is no longer reliable."""
-    return None
-
-
 def nspd_map_url(
     cadastral_number: str | None,
     *,
@@ -188,6 +156,16 @@ def nspd_map_url(
     else:
         params["query"] = cad
     return "https://nspd.gov.ru/map?" + urlencode(params, safe=":,")
+
+
+def rosreestr_cadastral_map_url(cadastral_number: str | None) -> str | None:
+    """Public cadastral map (ПКК): opens on nspd.gov.ru with cadastral query (Rosreestr PKK is hosted there)."""
+    return nspd_map_url(cadastral_number)
+
+
+def pkk_map_url(cadastral_number: str | None) -> str | None:
+    """Same as :func:`rosreestr_cadastral_map_url` (legacy field name in API)."""
+    return rosreestr_cadastral_map_url(cadastral_number)
 
 
 def nspd_lot_map_url(lot: Lot) -> str | None:
@@ -243,15 +221,6 @@ def _marketplace_url_from_template(
     return t.format(q=enc)
 
 
-def _marketplace_quick_links_enabled() -> bool:
-    return bool(settings.include_marketplace_quick_links or settings.include_marketplace_search_urls)
-
-
-def _regional_template(region_templates: dict[str, str], lot: Lot, fallback: str) -> str:
-    region = str(lot.region or "").strip()
-    return region_templates.get(region) or fallback
-
-
 def _valid_lat_lon(latitude: float | None, longitude: float | None) -> tuple[float, float] | None:
     if latitude is None or longitude is None:
         return None
@@ -294,7 +263,6 @@ def domclick_land_map_url(lot: Lot) -> str | None:
         return None
     lat, lon = centroid
     south, west, north, east = _bbox_around_wgs84(lat, lon, settings.marketplace_map_radius_km)
-    host = DOMCLICK_HOST_BY_REGION.get(str(lot.region or "").strip(), "domclick.ru")
     params = {
         "deal_type": "sale",
         "category": "living",
@@ -303,7 +271,7 @@ def domclick_land_map_url(lot: Lot) -> str | None:
         "ne": f"{_fmt_coord(north)},{_fmt_coord(east)}",
         "offset": "0",
     }
-    return f"https://{host}/search/on-map?" + urlencode(params, safe=",")
+    return "https://domclick.ru/search/on-map?" + urlencode(params, safe=",")
 
 
 def domclick_land_search_url(lot: Lot) -> str | None:
@@ -316,35 +284,4 @@ def domclick_land_search_url(lot: Lot) -> str | None:
 def domclick_land_search_url_cadastral_only(lot: Lot) -> str | None:
     return _marketplace_url_from_template(
         settings.domclick_search_template, _marketplace_search_query_cadastral_only(lot)
-    )
-
-
-def avito_search_url(lot: Lot) -> str | None:
-    """Best-effort Avito search for land listings."""
-    return _marketplace_url_from_template(
-        _regional_template(AVITO_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.avito_land_search_template),
-        _marketplace_search_query_full(lot),
-    )
-
-
-def avito_search_url_cadastral_only(lot: Lot) -> str | None:
-    return _marketplace_url_from_template(
-        _regional_template(AVITO_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.avito_land_search_template),
-        _marketplace_search_query_cadastral_only(lot),
-        enabled=_marketplace_quick_links_enabled(),
-    )
-
-
-def cian_land_search_url(lot: Lot) -> str | None:
-    return _marketplace_url_from_template(
-        _regional_template(CIAN_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.cian_land_search_template),
-        _marketplace_search_query_full(lot),
-    )
-
-
-def cian_land_search_url_cadastral_only(lot: Lot) -> str | None:
-    return _marketplace_url_from_template(
-        _regional_template(CIAN_LAND_SEARCH_TEMPLATE_BY_REGION, lot, settings.cian_land_search_template),
-        _marketplace_search_query_cadastral_only(lot),
-        enabled=_marketplace_quick_links_enabled(),
     )

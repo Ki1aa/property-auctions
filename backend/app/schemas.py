@@ -45,7 +45,7 @@ class LotListItem(BaseModel):
     discount_to_market: float | None = None
     market_valuation_reason: str | None = None
     investment_score: float | None = None
-    # Deep links (see external_lot_links); marketplace URLs are best-effort manual search.
+    # Deep links (see external_lot_links); Domclick search URLs are best-effort when enabled.
     app_lot_url: str | None = None
     # Concrete GIS Torgi lot page when notice and lot numbers are known.
     torgi_url: str | None = None
@@ -54,15 +54,11 @@ class LotListItem(BaseModel):
     torgi_json_url: str | None = None
     # NSPD public map entry point; cadastral number is shown separately to paste/search there.
     nspd_map_url: str | None = None
-    # Legacy field kept for API compatibility; currently null because old PKK deep links are unreliable.
+    # Public cadastral map (ПКК): nspd.gov.ru map query by cadastral number (PKK is hosted on NSPD).
     pkk_map_url: str | None = None
     domclick_map_url: str | None = None
     domclick_search_url: str | None = None
     domclick_search_url_cadastral: str | None = None
-    avito_search_url: str | None = None
-    avito_search_url_cadastral: str | None = None
-    cian_search_url: str | None = None
-    cian_search_url_cadastral: str | None = None
 
 
 class LotListPage(BaseModel):

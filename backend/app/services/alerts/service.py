@@ -10,14 +10,11 @@ from app.models import AlertEvent, Lot, LotSnapshot, OpenDataNotice, TelegramDig
 from app.services.alerts.telegram import send_telegram_message
 from app.services.external_lot_links import (
     app_public_lot_url,
-    avito_search_url,
-    avito_search_url_cadastral_only,
-    cian_land_search_url,
-    cian_land_search_url_cadastral_only,
     domclick_land_map_url,
     domclick_land_search_url,
     domclick_land_search_url_cadastral_only,
     nspd_lot_map_url,
+    pkk_map_url,
     torgi_notice_html_url,
     torgi_notice_json_link_when_distinct,
     torgi_public_url,
@@ -147,6 +144,11 @@ def _notice_identity(lot: Lot, latest_payload: dict[str, Any] | None) -> tuple[s
 def _notice_line(lot: Lot, latest_payload: dict[str, Any] | None) -> str:
     reg_num, lot_number, lot_count = _notice_identity(lot, latest_payload)
     if not reg_num and not lot_number:
+        sid = (lot.source_id or "").strip()
+        if sid and len(sid) <= 80 and not sid.lower().startswith("http"):
+            return f"ГИС: извещение не определено (source_id: {sid})"
+        if lot.id:
+            return f"ГИС: извещение не определено (id лота в мониторе: {lot.id})"
         return "ГИС: извещение не определено"
     parts: list[str] = []
     if reg_num:
@@ -199,12 +201,22 @@ def _why_interesting_text(lot: Lot, valuation: LotValuation, start_price_per_sot
 
 def _is_low_signal_alert(lot: Lot, valuation: LotValuation, start_price_per_sotka: float | None) -> bool:
     """True when sending this to Telegram would be noise for the MVP decision flow."""
-    return (
-        not lot.is_izhs_candidate
-        and not (lot.cadastral_number or "").strip()
-        and start_price_per_sotka is None
-        and valuation.discount_to_baseline is None
-    )
+    if lot.is_izhs_candidate:
+        return False
+    if (lot.cadastral_number or "").strip():
+        return False
+
+    idn = lot_notice_identity(lot, None)
+    has_notice = bool((idn.reg_num or "").strip())
+    worthless_metrics = start_price_per_sotka is None and valuation.discount_to_baseline is None
+    if worthless_metrics:
+        return True
+    disc = valuation.discount_to_baseline
+    meaningful_discount = disc is not None and disc > 0
+    if not has_notice and not meaningful_discount:
+        # No GIS regNum and no positive baseline signal — noise (e.g. test rows with only price/area).
+        return True
+    return False
 
 
 async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str) -> None:
@@ -278,10 +290,6 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     dom_map = domclick_land_map_url(lot)
     dom = domclick_land_search_url(lot)
     dom_cad = domclick_land_search_url_cadastral_only(lot)
-    avi = avito_search_url(lot)
-    avi_cad = avito_search_url_cadastral_only(lot)
-    cian = cian_land_search_url(lot)
-    cian_cad = cian_land_search_url_cadastral_only(lot)
     verdict, verdict_reasons = _alert_verdict(lot, valuation)
     location = _compact_join([lot.municipality, lot.settlement, lot.region])
     land_line = _compact_join(
@@ -327,30 +335,26 @@ async def notify_lot_event(db: Session, lot: Lot, event_type: str, payload: str)
     _append_unique_link(link_parts, seen_urls, app_u, "Монитор")
     _append_unique_link(link_parts, seen_urls, t_url, "ГИС Торги (лот)")
     _append_unique_link(link_parts, seen_urls, t_notice_url, "ГИС Торги (извещение)")
-    _append_unique_link(link_parts, seen_urls, nspd_u, "НСПД карта")
-    _append_unique_link(link_parts, seen_urls, dom_map, "Домклик (карта района)")
-    if settings.include_marketplace_quick_links and lot.cadastral_number:
-        _append_unique_link(link_parts, seen_urls, avi_cad, "Авито (кадастр)")
-        _append_unique_link(link_parts, seen_urls, cian_cad, "Циан (кадастр)")
+    _append_unique_link(link_parts, seen_urls, pkk_map_url(lot.cadastral_number), "ПКК (НСПД)")
+    _append_unique_link(link_parts, seen_urls, nspd_u, "НСПД (ФГИС ЕГРН)")
+    _append_unique_link(link_parts, seen_urls, dom_map, "Домклик")
     if settings.include_marketplace_search_urls:
         if lot.cadastral_number:
             _append_unique_link(link_parts, seen_urls, dom_cad, "Домклик (поиск, кадастр)")
-            _append_unique_link(link_parts, seen_urls, avi_cad, "Авито (поиск, кадастр)")
-            _append_unique_link(link_parts, seen_urls, cian_cad, "Циан (поиск, кадастр)")
         else:
             _append_unique_link(link_parts, seen_urls, dom, "Домклик (поиск, адрес)")
-            _append_unique_link(link_parts, seen_urls, avi, "Авито (поиск, адрес)")
-            _append_unique_link(link_parts, seen_urls, cian, "Циан (поиск, адрес)")
     _append_unique_link(link_parts, seen_urls, t_json, "ГИС Торги (JSON)")
     lines.append(" | ".join(link_parts) if link_parts else "—")
     lines.append("")
-    lines.append("<i>Baseline считается по уже загруженным торгам, это ещё не рыночная оценка Циан.</i>")
-    if settings.include_marketplace_quick_links or settings.include_marketplace_search_urls:
+    lines.append("<i>Baseline считается по уже загруженным торгам, это ещё не рыночная оценка по объявлениям.</i>")
+    if settings.include_marketplace_search_urls:
         lines.append(
-            "<i>Площадки: шаблонный поиск по кадастру/адресу; не гарантирует карточку участка.</i>"
+            "<i>Домклик (поиск): шаблонный запрос по кадастру/адресу; не гарантирует карточку участка.</i>"
         )
     if dom_map:
-        lines.append("<i>Домклик-карта открывает район вокруг центроида; это ручной поиск аналогов, не оценка.</i>")
+        lines.append(
+            "<i>Домклик: карта объявлений вокруг участка для оценки цен соседних лотов; не официальная оценка.</i>"
+        )
     if nspd_u:
         lines.append("<i>НСПД: если карта не откроет участок автоматически, вставьте кадастровый номер в поиск.</i>")
 

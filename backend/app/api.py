@@ -13,10 +13,6 @@ from app import scheduler as ingest_scheduler
 from app.config import settings
 from app.services.external_lot_links import (
     app_public_lot_url,
-    avito_search_url,
-    avito_search_url_cadastral_only,
-    cian_land_search_url,
-    cian_land_search_url_cadastral_only,
     domclick_land_map_url,
     domclick_land_search_url,
     domclick_land_search_url_cadastral_only,
@@ -163,10 +159,6 @@ def _lot_list_item(
         domclick_map_url=domclick_land_map_url(lot),
         domclick_search_url=domclick_land_search_url(lot),
         domclick_search_url_cadastral=domclick_land_search_url_cadastral_only(lot),
-        avito_search_url=avito_search_url(lot),
-        avito_search_url_cadastral=avito_search_url_cadastral_only(lot),
-        cian_search_url=cian_land_search_url(lot),
-        cian_search_url_cadastral=cian_land_search_url_cadastral_only(lot),
     )
 
 

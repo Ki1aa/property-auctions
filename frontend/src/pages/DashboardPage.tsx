@@ -87,8 +87,6 @@ export function DashboardPage() {
             offset: 0,
             region: "72",
             isIzhs: true,
-            hasPricePerSotka: true,
-            hasPositiveDiscount: true,
             sort: "discount_to_baseline_desc",
           }),
         ]);

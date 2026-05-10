@@ -12,8 +12,16 @@ def _lot(**kwargs) -> Lot:
     return Lot(**base)
 
 
-def test_pkk_map_url_is_disabled():
-    assert links.pkk_map_url("72:23:0123456:7") is None
+def test_pkk_map_url_uses_nspd_public_cadastral_map():
+    url = links.pkk_map_url("72:23:0123456:7")
+    assert url is not None
+    assert "nspd.gov.ru/map" in url
+    assert "query=72:23:0123456:7" in url
+
+
+def test_rosreestr_cadastral_map_url_empty_when_no_cadastral():
+    assert links.rosreestr_cadastral_map_url(None) is None
+    assert links.rosreestr_cadastral_map_url("") is None
 
 
 def test_nspd_map_url_requires_cadastral_number():
@@ -151,7 +159,7 @@ def test_torgi_public_falls_back_to_json_url():
     assert links.torgi_public_url(lot, None) == "https://torgi.gov.ru/notice.json"
 
 
-def test_domclick_and_avito_use_query_from_lot(monkeypatch):
+def test_domclick_search_uses_query_from_lot(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", True)
     lot = _lot(
         source_id="72000000000000000123",
@@ -161,9 +169,7 @@ def test_domclick_and_avito_use_query_from_lot(monkeypatch):
         region="72",
     )
     d = links.domclick_land_search_url(lot)
-    a = links.avito_search_url(lot)
     assert d is not None and "domclick.ru" in d and "query=" in d
-    assert a is not None and "avito.ru/tyumen/zemelnye_uchastki" in a and "q=" in a
 
 
 def test_domclick_map_url_uses_nspd_centroid(monkeypatch):
@@ -178,7 +184,7 @@ def test_domclick_map_url_uses_nspd_centroid(monkeypatch):
     url = links.domclick_land_map_url(lot)
 
     assert url is not None
-    assert url.startswith("https://tyumen.domclick.ru/search/on-map?")
+    assert url.startswith("https://domclick.ru/search/on-map?")
     assert "offer_type=lot" in url
     assert "sw=57.107284,65.444392" in url
     assert "ne=57.197116,65.610008" in url
@@ -191,7 +197,7 @@ def test_domclick_map_url_falls_back_to_lot_coordinates(monkeypatch):
     url = links.domclick_land_map_url(lot)
 
     assert url is not None
-    assert url.startswith("https://xanty-mansijsk.domclick.ru/search/on-map?")
+    assert url.startswith("https://domclick.ru/search/on-map?")
 
 
 def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
@@ -207,13 +213,9 @@ def test_domclick_map_url_disabled_or_without_coordinates(monkeypatch):
 
 def test_marketplace_disabled(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
-    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", False)
     lot = _lot(cadastral_number="72:01:1:1", region="72")
     assert links.domclick_land_search_url(lot) is None
-    assert links.avito_search_url(lot) is None
-    assert links.avito_search_url_cadastral_only(lot) is None
-    assert links.cian_land_search_url(lot) is None
-    assert links.cian_land_search_url_cadastral_only(lot) is None
+    assert links.domclick_land_search_url_cadastral_only(lot) is None
 
 
 def test_torgi_json_link_when_distinct_requires_html_and_differs():
@@ -240,54 +242,12 @@ def test_cadastral_only_search_urls(monkeypatch):
         region="72",
     )
     d = links.domclick_land_search_url_cadastral_only(lot)
-    a = links.avito_search_url_cadastral_only(lot)
-    c = links.cian_land_search_url_cadastral_only(lot)
     assert d is not None and "domclick.ru" in d
-    assert a is not None and "avito.ru/tyumen/zemelnye_uchastki" in a
-    assert c is not None and "tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast" in c
     assert "Тестовая" not in (d or "")
-    assert "Тестовая" not in (a or "")
-    assert "Тестовая" not in (c or "")
 
 
-def test_regional_quick_links_moscow(monkeypatch):
-    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
-    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", True)
-    lot = _lot(cadastral_number="77:01:1:1", region="77")
-    avito = links.avito_search_url_cadastral_only(lot)
-    cian = links.cian_land_search_url_cadastral_only(lot)
-    assert avito is not None and "avito.ru/moskva/zemelnye_uchastki" in avito
-    assert cian is not None and "cian.ru/kupit-zemelniy-uchastok-moskva" in cian
-
-
-def test_cian_disabled_when_template_empty(monkeypatch):
+def test_domclick_disabled_when_template_empty(monkeypatch):
     monkeypatch.setattr(links.settings, "include_marketplace_search_urls", True)
-    monkeypatch.setattr(links.settings, "cian_land_search_template", "")
+    monkeypatch.setattr(links.settings, "domclick_search_template", "")
     lot = _lot(cadastral_number="99:01:1:1", region="99")
-    assert links.cian_land_search_url(lot) is None
-
-
-def test_marketplace_quick_links_work_without_full_search(monkeypatch):
-    monkeypatch.setattr(links.settings, "include_marketplace_search_urls", False)
-    monkeypatch.setattr(links.settings, "include_marketplace_quick_links", True)
-    lot = _lot(
-        source_id="72000000000000000123",
-        cadastral_number="72:01:1:1",
-        address="ул. Тестовая",
-        municipality="Тюмень",
-        region="72",
-    )
-
     assert links.domclick_land_search_url(lot) is None
-    assert links.domclick_land_search_url_cadastral_only(lot) is None
-    assert links.avito_search_url(lot) is None
-    assert links.cian_land_search_url(lot) is None
-
-    avito = links.avito_search_url_cadastral_only(lot)
-    cian = links.cian_land_search_url_cadastral_only(lot)
-
-    assert avito == "https://www.avito.ru/tyumen/zemelnye_uchastki?q=72%3A01%3A1%3A1"
-    assert cian == (
-        "https://tyumen.cian.ru/kupit-zemelniy-uchastok-tyumenskaya-oblast/"
-        "?text=72%3A01%3A1%3A1"
-    )

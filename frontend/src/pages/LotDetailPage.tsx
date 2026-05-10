@@ -156,21 +156,21 @@ export function LotDetailPage() {
       </section>
 
       <section className="section">
-        <h2>Проверка источника</h2>
+        <h2>Ссылки на лот и карты</h2>
         <div className="card">
           {lot.torgi_url ? (
             <div className="card__row">
-              <span className="card__label">Лот ГИС Торги</span>
+              <span className="card__label">Лот на ГИС Торги</span>
               <span>
                 <a href={lot.torgi_url} target="_blank" rel="noreferrer">
-                  Открыть лот
+                  Открыть карточку лота
                 </a>
               </span>
             </div>
           ) : null}
           {lot.torgi_notice_url ? (
             <div className="card__row">
-              <span className="card__label">Извещение ГИС Торги</span>
+              <span className="card__label">Извещение на ГИС Торги</span>
               <span>
                 <a href={lot.torgi_notice_url} target="_blank" rel="noreferrer">
                   Открыть извещение
@@ -202,27 +202,37 @@ export function LotDetailPage() {
             {lot.notice_reg_num ? ` извещение ${lot.notice_reg_num}` : " извещение не определено"}
             {lot.notice_lot_number ? `, ${noticeLotLabel}` : ""}.
           </p>
-          {lot.nspd_map_url ? (
+          {lot.pkk_map_url ? (
             <div className="card__row">
-              <span className="card__label">НСПД карта</span>
+              <span className="card__label">ПКК (НСПД)</span>
               <span>
-                <a href={lot.nspd_map_url} target="_blank" rel="noreferrer">
-                  Открыть публичную кадастровую карту
+                <a href={lot.pkk_map_url} target="_blank" rel="noreferrer">
+                  Публичная кадастровая карта — поиск по кадастру на nspd.gov.ru
                 </a>
               </span>
             </div>
           ) : null}
-          {lot.nspd_map_url ? (
+          {lot.nspd_map_url && lot.nspd_map_url !== lot.pkk_map_url ? (
+            <div className="card__row">
+              <span className="card__label">НСПД (ФГИС ЕГРН)</span>
+              <span>
+                <a href={lot.nspd_map_url} target="_blank" rel="noreferrer">
+                  Карта с центроидом / карточкой участка (обогащение НСПД)
+                </a>
+              </span>
+            </div>
+          ) : null}
+          {lot.pkk_map_url || lot.nspd_map_url ? (
             <p className="card__footnote">
-              Если НСПД не откроет участок автоматически, вставьте кадастровый номер {lot.cadastral_number || "из карточки"} в поиск карты.
+              Если карта не откроет участок автоматически, вставьте кадастровый номер {lot.cadastral_number || "из карточки"} в поиск.
             </p>
           ) : null}
           {lot.domclick_map_url ? (
             <div className="card__row">
-              <span className="card__label">Домклик карта</span>
+              <span className="card__label">Домклик</span>
               <span>
                 <a href={lot.domclick_map_url} target="_blank" rel="noreferrer">
-                  Смотреть цены рядом
+                  Карта объявлений в округе
                 </a>
               </span>
             </div>
@@ -247,56 +257,9 @@ export function LotDetailPage() {
               </span>
             </div>
           ) : null}
-          {lot.avito_search_url_cadastral ? (
-            <div className="card__row">
-              <span className="card__label">Авито (кадастр)</span>
-              <span>
-                <a href={lot.avito_search_url_cadastral} target="_blank" rel="noreferrer">
-                  Поиск по кадастровому номеру
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.avito_search_url ? (
-            <div className="card__row">
-              <span className="card__label">Авито (расширенный)</span>
-              <span>
-                <a href={lot.avito_search_url} target="_blank" rel="noreferrer">
-                  Поиск участков (оценочно)
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.cian_search_url_cadastral ? (
-            <div className="card__row">
-              <span className="card__label">Циан (кадастр)</span>
-              <span>
-                <a href={lot.cian_search_url_cadastral} target="_blank" rel="noreferrer">
-                  Поиск по кадастровому номеру
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {lot.cian_search_url ? (
-            <div className="card__row">
-              <span className="card__label">Циан (расширенный)</span>
-              <span>
-                <a href={lot.cian_search_url} target="_blank" rel="noreferrer">
-                  Поиск участков (оценочно)
-                </a>
-              </span>
-            </div>
-          ) : null}
-          {(lot.domclick_map_url ||
-            lot.domclick_search_url ||
-            lot.domclick_search_url_cadastral ||
-            lot.avito_search_url ||
-            lot.avito_search_url_cadastral ||
-            lot.cian_search_url ||
-            lot.cian_search_url_cadastral) && (
+          {(lot.domclick_map_url || lot.domclick_search_url || lot.domclick_search_url_cadastral) && (
             <p className="card__footnote">
-              Ссылки на Домклик, Авито и Циан ведут в общий поиск или карту района; это не официальная карточка участка
-              и не оценка рынка.
+              Ссылки Домклик ведут в общий поиск или карту района; это не официальная карточка участка и не оценка рынка.
             </p>
           )}
         </div>

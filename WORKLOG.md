@@ -6,6 +6,67 @@
 
 ---
 
+## 2026-05-10 - Перезапуск dev: порт 8001 из-за «фантома» на 8000; проверка ПКК/НСПД
+
+**Что сделано:** На Windows `127.0.0.1:8000` оставался отвечать старый экземпляр API (`pkk_map_url` = null при живом `nspd_map_url`); новый uvicorn не мог занять порт (ошибка bind). Остановлены видимые `python`/Vite; актуальный backend поднят на **8001**, Vite на **5173** с `VITE_API_BASE_URL=http://127.0.0.1:8001`. Проверка: `GET /api/lots?has_cadastral=true` — `pkk_map_url` с `query=...`, `nspd_map_url` с `selectedCard` при обогащении; открыт `/lots` в браузере.
+
+**Проверки:** `Invoke-RestMethod` к `http://127.0.0.1:8001/api/lots?limit=1&has_cadastral=true`.
+
+**Известные проблемы / TODO:** Слушатель на `:8000` с PID без живого процесса в `tasklist` — при необходимости перезагрузка ОС или разбор портов; до этого для dev использовать 8001 или освободить 8000 вручную.
+
+---
+
+## 2026-05-10 - ПКК: рабочие ссылки через НСПД; Домклик domclick.ru; таблица лотов
+
+**Что сделано:**
+- [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): `pkk_map_url` / `rosreestr_cadastral_map_url` = тот же `nspd.gov.ru/map` с ПКК-слоем и `query` по кадастру (старый `pkk.rosreestr.ru/#/search` часто не открывается); карта Домклик всегда с `https://domclick.ru/search/on-map`; нормализация `http://torgi.gov.ru` → `https` для JSON/официальных href.
+- UI: [frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx) — ссылка «НСПД», если `nspd_map_url` отличается от ПКК (обогащённый deep link); подписи ПКК уточнены в [LotDetailPage.tsx](frontend/src/pages/LotDetailPage.tsx), Telegram «ПКК (НСПД)».
+- Тесты и [AGENTS.md](AGENTS.md) обновлены под новые URL.
+
+**Проверки:** `python -m pytest` в `backend`; `npx tsc --noEmit` в `frontend`.
+
+---
+
+## 2026-05-10 - Скрипт демо-алерта Telegram (как в проде)
+
+**Что сделано:** [backend/scripts/send_telegram_demo_alert.py](backend/scripts/send_telegram_demo_alert.py) — in-memory SQLite, несколько лотов для baseline, один синтетический ИЖС-лот с кадастром и дисконтом к baseline; вызов `notify_lot_event` (тот же HTML, что при ingest). Команда: `python scripts/send_telegram_demo_alert.py` из `backend/`. В [AGENTS.md](AGENTS.md) добавлена строка в список скриптов.
+
+---
+
+## 2026-05-10 - Telegram: меньше шума без regNum ГИС; подсказка в тексте алерта
+
+**Что сделано:**
+- [backend/app/services/alerts/service.py](backend/app/services/alerts/service.py): уточнён `_is_low_signal_alert` — после базовой проверки (не ИЖС, нет кадастра, нет ₽/сотки и дисконта) дополнительно не слать алерт, если нет `regNum` извещения и нет положительного `discount_to_baseline` (отсекаются тестовые строки с ценой/площадью без привязки к ГИС).
+- Строка «ГИС: извещение не определено» дополняется `source_id` или `id лота` для отладки.
+- Тест [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py) `test_notify_skips_lot_with_price_per_sotka_but_no_gis_notice`.
+
+**Проверки:** `python -m pytest` в `backend`: 115 passed.
+
+---
+
+## 2026-05-10 - Лоты: убраны быстрые фильтры «С ₽/сотка» и «С дисконтом»
+
+**Что сделано:**
+- [frontend/src/pages/LotsPage.tsx](frontend/src/pages/LotsPage.tsx): удалены чекбоксы и query/API-параметры `has_price_per_sotka`, `has_positive_discount`; сортировки по сотке и дисконту в выпадающем списке сохранены.
+- [frontend/src/pages/DashboardPage.tsx](frontend/src/pages/DashboardPage.tsx): shortlist ИЖС больше не накладывает эти два фильтра при загрузке.
+
+**Проверки:** `npx tsc --noEmit`, `npm run test` в `frontend`.
+
+---
+
+## 2026-05-10 - Убраны Авито/Циан из ссылок; колонка «Домклик»
+
+**Что сделано:**
+- API/UI/Telegram: удалены поля и ссылки Авито и Циан; из [backend/app/config.py](backend/app/config.py) убраны `INCLUDE_MARKETPLACE_QUICK_LINKS`, шаблоны Avito/Cian; [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py) — только Домклик (карта + опциональный поиск).
+- Таблица лотов: подпись ссылки на карту — «Домклик» вместо «Цены рядом» ([frontend/src/components/LotsTable.tsx](frontend/src/components/LotsTable.tsx)).
+- Документация и `.env.example` синхронизированы; [backend/scripts/check_external_hosts.py](backend/scripts/check_external_hosts.py) — без avito/cian.
+
+**Проверки:**
+- `pytest` в `backend`: 114 passed.
+- `npx tsc --noEmit`, `npm run test` в `frontend`: ок.
+
+---
+
 ## 2026-05-11 - План roadmap: агрегаторы, НСПД, Telegram digest, рынок, prod-CI
 
 **Что сделано:**
@@ -18,6 +79,18 @@
 **Проверки:**
 - `python -m pytest` в `backend`: 115 passed.
 - `npx tsc --noEmit`, `npm run test`, `npm run build` в `frontend`: ок.
+
+---
+
+## 2026-05-10 - ПКК Росреестра (`pkk_map_url`) и актуализация тестов
+
+**Что сделано:**
+- `pkk_map_url` / `rosreestr_cadastral_map_url` в [backend/app/services/external_lot_links.py](backend/app/services/external_lot_links.py): ссылка на поиск ПКК по кадастровому номеру (`pkk.rosreestr.ru`).
+- Тесты: [backend/tests/test_external_lot_links.py](backend/tests/test_external_lot_links.py), [backend/tests/test_api.py](backend/tests/test_api.py) (`pkk_map_url` в деталях лота), [backend/tests/test_alerts_service.py](backend/tests/test_alerts_service.py) (домен ПКК и подписи «НСПД (ФГИС ЕГРН)», «Домклик (цены участков рядом)»).
+
+**Проверки:**
+- `pytest` в `backend`: 116 passed.
+- `npx tsc --noEmit`, `npm run test` в `frontend`: ок.
 
 ---
 

@@ -22,8 +22,6 @@ DEFAULT_HOSTS = (
     "torgi.gov.ru",
     "nspd.gov.ru",
     "domclick.ru",
-    "avito.ru",
-    "cian.ru",
 )
 
 

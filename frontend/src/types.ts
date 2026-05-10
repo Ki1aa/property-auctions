@@ -82,16 +82,12 @@ export type Lot = {
   torgi_json_url: string | null;
   /** NSPD public map entry point; cadastral number is shown separately for search. */
   nspd_map_url: string | null;
-  /** Legacy field; currently null because old PKK deep links are unreliable. */
+  /** Публичная кадастровая карта (ПКК) на nspd.gov.ru — поиск по кадастровому номеру. */
   pkk_map_url: string | null;
-  /** Domclick map around lot centroid when coordinates are known. */
+  /** Домклик: карта объявлений о продаже участков в округе (оценка рынка вручную). */
   domclick_map_url: string | null;
   domclick_search_url: string | null;
   domclick_search_url_cadastral: string | null;
-  avito_search_url: string | null;
-  avito_search_url_cadastral: string | null;
-  cian_search_url: string | null;
-  cian_search_url_cadastral: string | null;
 };
 
 export type LotListPage = {
