@@ -6,6 +6,73 @@
 
 ---
 
+## 2026-05-12 - Веха: MVP GIS Torgi Monitor закрыт (ручная прод-проверка)
+
+**Итог:** После нескольких бессонных ночей зафиксирован **достигнутый MVP** для контура **ГИС Торги Monitor** в параллельной схеме `mvp_gis_*`: OpenData, устойчивый discovery через `meta.json`, загрузка **одного** среза без синтеза соседних несуществующих URL (`python scripts/ingest_torgi.py --source-url`, не через `INGEST_SOURCE_URL` на `data-*.json`), земельный фильтр **`ZK`**, запись в **PostgreSQL** при `alembic current == head`, **Telegram** с фокусом на **регион 72**, ссылка **НСПД/ПКК** по кадастровому номеру. Рыночные аналоги и полная интеграция НСПД в legacy `lots` остаются в roadmap.
+
+**Проверено вручную:**
+- `alembic current` == `head`
+- OpenData: срезы из `meta.json`, без ложных соседних срезов
+- Ingest: `--source-url` на конкретный `data-*.json`; dry-run (`would_upsert`, `land_rows`) и реальный upsert; повторный прогон без дублей (`lot_external_id`)
+- `INGEST_LAND_FILTER_BIDD_TYPE_CODES=ZK`
+- PostgreSQL: `mvp_gis_notices` / `mvp_gis_lots` / `mvp_gis_lot_versions`; `mvp_gis_telegram_events` по факту отправок
+- Telegram: алерты для региона 72
+- НСПД: ссылка по кадастру
+
+**Код и документация в коммите (сводка):** [`run_mvp_ingest`](backend/app/services/mvp/pipeline.py) с `data_file_url`; [`ingest_torgi.py`](backend/scripts/ingest_torgi.py) `--source-url`, dry-run `would_upsert`; [`debug_find_land_lots.py`](backend/scripts/debug_find_land_lots.py) и `--find-region-72`; [`test_mvp_ingest_single_url.py`](backend/tests/test_mvp_ingest_single_url.py); README, AGENTS.
+
+**Проверки:** `pytest` — 147 passed.
+
+---
+
+## 2026-05-12 - debug_find_land_lots: режим `--find-region-72`
+
+**Что сделано:** [`backend/scripts/debug_find_land_lots.py`](backend/scripts/debug_find_land_lots.py) — флаг `--find-region-72`: проход последних N срезов meta (newest-first), для каждого файла строка с `records_in_file`, `land_in_file`, `region_72_land_count`, `signal_*_72`; остановка на первом файле с `region_72_land_count > 0`; до 5 примеров с `notice_url` / `lot_url` / `nspd_url` ([`link_builder`](backend/app/services/mvp/link_builder.py)). Опция `--max-records-per-file` (0 = без лимита). Без БД и Telegram.
+
+**Проверки:** `pytest` — 147 passed; ручной smoke `--find-region-72 --max-files 2`.
+
+---
+
+## 2026-05-12 - MVP ingest: один data URL через CLI (`--source-url`)
+
+**Что сделано:** [`run_mvp_ingest`](backend/app/services/mvp/pipeline.py) принимает опциональный `data_file_url`: один `data-*.json` через `_parse_dataset_file_url`, без `build_discovery_plan` и без ветки `INGEST_SOURCE_URL` с синтезом соседних срезов. В dry-run `upserted` остаётся 0, добавлен счётчик `would_upsert`. [`backend/scripts/ingest_torgi.py`](backend/scripts/ingest_torgi.py): `--source-url`. Тест [`backend/tests/test_mvp_ingest_single_url.py`](backend/tests/test_mvp_ingest_single_url.py).
+
+**Проверки:** `pytest` — 147 passed.
+
+---
+
+## 2026-05-12 - Диагностика земельных лотов: debug_find_land_lots.py
+
+**Что сделано:** Скрипт [`backend/scripts/debug_find_land_lots.py`](backend/scripts/debug_find_land_lots.py) — читает последние N `data-*.json` из `meta.json`, без записи в БД и без Telegram; те же шаги что MVP: `normalize_lot` → `_maybe_enrich_with_detail` → `classify_normalized_lot`; счётчики записей и `land_rows`, гистограммы `biddTypeCode` / `subjectEstateCode` / полей лота, объяснение фильтра `ZK`, до 10 примеров земельных кандидатов (дедуп по notice+lot+cadastral). В [README.md](README.md), [AGENTS.md](AGENTS.md) добавлена команда.
+
+**Проверки:** ручной smoke `python scripts/debug_find_land_lots.py --max-files 3 --max-records 200 --detail-cap 80`; `pytest` — без новых тестов на скрипт.
+
+---
+
+## 2026-05-12 - OpenData discovery: meta.json как источник data-/structure-файлов
+
+**Что сделано:** [`backend/app/services/ingest/discovery.py`](backend/app/services/ingest/discovery.py) — для registry/card путей сначала загружается `meta.json` датасета; список срезов берётся только из `meta["data"][]` (поле `source` + `structure`), сопоставление `structure-*.json` с блоком `meta["structure"][]`; операционный/backfill-план **не синтезирует** URL по календарю (исключение: прямой override `INGEST_SOURCE_URL` на `data-*.json` — прежняя логика watermark). Расширен [`DiscoveryPlan`](backend/app/services/ingest/discovery.py): `meta_json_url`, `discovery_error`, `discovery_warning`, `available_data_urls`, `attempted_urls`; при ошибке — текст с рекомендациями по `TORGI_OPENDATA_*` / `INGEST_SOURCE_URL`. [`backend/app/services/ingest/service.py`](backend/app/services/ingest/service.py) и [`backend/app/services/mvp/pipeline.py`](backend/app/services/mvp/pipeline.py) обрабатывают `discovery_error` / логируют `discovery_warning`. Скрипт диагностики [`backend/scripts/torgi_discover.py`](backend/scripts/torgi_discover.py) + [`run_torgi_discovery_diagnostic`](backend/app/services/ingest/discovery.py). Тесты: [`backend/tests/test_discovery_meta.py`](backend/tests/test_discovery_meta.py), обновлён [`backend/tests/test_ingest_discovery.py`](backend/tests/test_ingest_discovery.py).
+
+**Проверки:** `pytest` — 146 passed.
+
+---
+
+## 2026-05-11 - Очистка SQLite и повторная загрузка
+
+**Что сделано:** Резервная копия `data/app.db` в `data/backups/app_20260511_033234.db` (скрипт `backup_mvp_db.py` пропустил копирование из-за не-SQLite `DATABASE_URL` в окружении агента — использован ручной `Copy-Item`). Удалён `data/app.db`, пересоздана схема через `Base.metadata.create_all` (включая `mvp_gis_*`). Запущен legacy `run_ingest`: частично успешно (`upserted_count` 63, один файл failed — SSL `CERTIFICATE_VERIFY_FAILED` и/или ответ Торгов о недоступном срезе). `ingest_torgi.py` без записей в `.env` для `INGEST_LAND_FILTER_BIDD_TYPE_CODES` требует переменную; с override `ZK` discovery вернул ошибку по отсутствующему `data-...structure-...json` (срез ещё не опубликован).
+
+**Нужно вручную:** в корневом `.env` задать `INGEST_LAND_FILTER_BIDD_TYPE_CODES=ZK` (или `INGEST_LAND_FILTER_RELAXED=true` только для отладки); при SSL через прокси — настроить доверие/маршрут к `torgi.gov.ru`; повторить ingest позже или `python scripts/ingest_torgi.py --dry-run --limit 50` после появления среза.
+
+---
+
+## 2026-05-12 - MVP GIS: таблицы mvp_gis_*, ingest_torgi, классификация и Telegram
+
+**Что сделано:** Параллельная схема ORM [`backend/app/models_mvp.py`](backend/app/models_mvp.py) (`mvp_gis_notices`, `mvp_gis_lots`, `mvp_gis_lot_versions`, `mvp_gis_telegram_events`) без замены legacy `lots`. Конфиг: `INGEST_LAND_FILTER_BIDD_TYPE_CODES`, `INGEST_LAND_FILTER_RELAXED`, `TELEGRAM_MIN_SIGNAL_LEVEL`, `TELEGRAM_PENDING_STALE_MINUTES` в [`backend/app/config.py`](backend/app/config.py), [`.env.example`](.env.example). Сервисы: [`backend/app/services/mvp/`](backend/app/services/mvp/) — `link_builder`, `content_hash` (11 бизнес-полей), `classify` (signal HIGH/MEDIUM/LOW/NONE, blacklist с исключением ЗУ+кадастр), `pipeline.run_mvp_ingest`, `mvp_telegram`. Скрипты: [`backend/scripts/ingest_torgi.py`](backend/scripts/ingest_torgi.py), [`backend/scripts/backup_mvp_db.py`](backend/scripts/backup_mvp_db.py). Alembic: [`backend/alembic/versions/20260512_16_mvp_gis_tables.py`](backend/alembic/versions/20260512_16_mvp_gis_tables.py). API: [`backend/app/mvp_api.py`](backend/app/mvp_api.py) (`/api/mvp/stats`, `/api/mvp/lots`). Регистрация таблиц в [`backend/app/main.py`](backend/app/main.py). `send_telegram_message` возвращает `message_id`. Документация: [`docs/GIS_TORGI_FIELD_RESEARCH.md`](docs/GIS_TORGI_FIELD_RESEARCH.md), правка [`docs/MVP_PRODUCT_CONTRACT.md`](docs/MVP_PRODUCT_CONTRACT.md), [AGENTS.md](AGENTS.md). Тесты: [`backend/tests/test_mvp_gis.py`](backend/tests/test_mvp_gis.py).
+
+**Проверки:** `pytest` — 140 passed.
+
+---
+
 ## 2026-05-12 - Git: `main` на GitHub выровнен под `codex/gis_torgi_v2`
 
 **Что сделано:** Локально `main` сброшен на тот же коммит, что рабочая ветка (`git reset --hard codex/gis_torgi_v2`), на GitHub выполнен `git push origin main --force-with-lease` (`579cb90` → `481c345`). Конфликтный merge `main` + `codex/gis_torgi_v2` отменён: единый источник правды — состояние ветки разработки.

@@ -95,6 +95,10 @@ backend/
     dev_sync_schema.py              # dev-only: ALTER TABLE + недостающие индексы для существующей SQLite; FK только предупреждением
     send_telegram_test.py           # smoke: одно тестовое сообщение по TELEGRAM_* из .env
     send_telegram_demo_alert.py     # демо-карточка лота: in-memory БД + реальный notify_lot_event
+    ingest_torgi.py                 # MVP GIS ingest в mvp_gis_*: --dry-run --limit N; --source-url data-*.json без discovery
+    torgi_discover.py               # диагностика OpenData: meta.json, список data-URL, выбранный срез
+    debug_find_land_lots.py         # последние срезы meta: гистограммы biddTypeCode/ZK, примеры земли, без БД
+    backup_mvp_db.py                # копия SQLite data/app.db в data/backups/ перед сменой схемы
   tests/                            # pytest (api, ingest client/discovery/service/upsert, normalizer, detail_parser, retry, notice-link)
   requirements.txt
   alembic.ini
@@ -339,6 +343,7 @@ python scripts/repair_poisoned_ingest_manifests.py
 - Pytest: 125+ тестов (API + baseline/quality metrics/ingest status/manual start, notice_payload/link fields, PKK resolve on lot detail, stable lot notice identity, Telegram/digest, market_median, NSPD client/enrich/deep links, Domclick map bbox, ingest client/discovery/service с region+detail+retry+notice-link+multi-lot split+documentType events+land-filter, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены/категории/ВРИ + ФИАС).
 - SPA: основное меню сфокусировано на Dashboard / Lots / IngestRuns; технические страницы Notices и Map остаются доступными по маршрутам. Lots: пагинация, быстрые фильтры качества, сортировка по ₽/сотка, CSV, регион/муниципалитет/тип; LotDetail показывает ключевую сводку, источник ГИС как извещение и номер внутреннего лота - [frontend/src/](frontend/src).
 - TypeScript-проверка чистая, frontend tests проходят, Vite production build проходит. MapLibre вынесен в отдельный async chunk; предупреждение о крупном chunk теперь относится к лениво загружаемой карте.
+- **MVP GIS (`mvp_gis_*`, [`scripts/ingest_torgi.py`](backend/scripts/ingest_torgi.py)):** на PostgreSQL (Alembic head) проверены: discovery через `meta.json`, ингест одного среза `--source-url` (без синтеза соседних дней из `INGEST_SOURCE_URL`), фильтр `ZK`, Telegram для региона 72, ссылка НСПД по кадастру. Журнал: [WORKLOG.md](WORKLOG.md) (запись 2026-05-12 «Веха: MVP»).
 
 **Не сделано / на паузе:**
 - НСПД: обогащение при ingest при `NSPD_ENABLED` (сеть к `nspd.gov.ru`) и ручной догон существующей БД через `python scripts/enrich_lots_nspd.py --region 72 --limit 50 --force`; для локального split tunneling с битой TLS-цепочкой есть dev-флаг `NSPD_VERIFY_TLS=false`. Внешние площадки как источники **рыночных аналогов** — в roadmap; в API/UI/Telegram остаются только ссылки Домклик: карта вокруг участка при `INCLUDE_MARKETPLACE_MAP_URLS=true` и опциональный текстовый поиск при `INCLUDE_MARKETPLACE_SEARCH_URLS=true`.
@@ -376,3 +381,4 @@ python scripts/repair_poisoned_ingest_manifests.py
 Закрыто в 2026-05-07: UX загрузок: `/ingest` показывает текущий статус/расписание/следующий запуск и умеет запускать ingest вручную через `POST /api/ingest-runs/start`.
 Закрыто в 2026-05-08: ingest по умолчанию сохраняет все регионы РФ (`TARGET_REGION_CODES` пустой), региональный фокус убран из UI `/ingest`.
 Закрыто в 2026-05-08: server-side сортировка `/api/opendata-notices` по публикации, реестровому номеру, типу документа и виду торгов + составные индексы для стабильной пагинации.
+Закрыто в 2026-05-12: **MVP GIS** — контур `mvp_gis_*` на PostgreSQL: `meta.json` discovery, `ingest_torgi.py --source-url`, фильтр `ZK`, Telegram региона 72, НСПД по кадастру (см. [WORKLOG.md](WORKLOG.md)).
