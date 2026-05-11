@@ -46,6 +46,8 @@ npm run dev
    - Frontend: `http://localhost:5173`
    - Healthcheck: `GET http://localhost:8000/health`
 
+Доступ с других машин в LAN: в корневом `.env` задайте `VITE_API_BASE_URL` и `CORS_ALLOW_ORIGINS` (см. [AGENTS.md](AGENTS.md), «Доступ к dev с другого ПК в LAN»).
+
 `INGEST_SOURCE_URL` поддерживает два формата:
 - URL карточки открытых данных (например, `.../new/public/opendata/...`);
 - прямой URL на `data-*.json`.

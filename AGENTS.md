@@ -235,6 +235,14 @@ npm run dev
 - SPA: http://localhost:5173
 - Healthcheck: GET http://localhost:8000/health
 
+**Доступ к dev с другого ПК в LAN (`--host 0.0.0.0` уже у uvicorn и у `npm run dev`):**
+
+1. В корневом `.env` на машине, где собирается/крутится Vite, задайте `VITE_API_BASE_URL=http://<хост_API>:8000` — адрес, куда **браузер** должен слать `/api/*` (часто IP машины с uvicorn, не `localhost` клиента).
+2. В тот же `.env` добавьте точный Origin SPA в `CORS_ALLOW_ORIGINS` (через запятую), например `http://10.50.0.94:5173` если страницу открывают по LAN-IP; при смене порта Vite (5174+) добавьте и его.
+3. Перезапустите backend и frontend. Preflight: `curl.exe -i -X OPTIONS "http://<IP>:8000/api/lots?limit=5&offset=0" -H "Origin: http://<IP>:5173" -H "Access-Control-Request-Method: GET"`.
+
+Переменные: [.env.example](.env.example) (`VITE_API_BASE_URL`, `CORS_ALLOW_ORIGINS`).
+
 **Сборка / проверки:**
 
 ```powershell
@@ -342,6 +350,7 @@ python scripts/repair_poisoned_ingest_manifests.py
 - Offline demo path: `python scripts/load_demo_tyumen_data.py --reset` загружает воспроизводимый набор Тюменской области из `data/raw` без live-сети.
 - Pytest: 125+ тестов (API + baseline/quality metrics/ingest status/manual start, notice_payload/link fields, PKK resolve on lot detail, stable lot notice identity, Telegram/digest, market_median, NSPD client/enrich/deep links, Domclick map bbox, ingest client/discovery/service с region+detail+retry+notice-link+multi-lot split+documentType events+land-filter, нормализатор, detail_parser: текстовые fallback'и + characteristic-коды площади/цены/категории/ВРИ + ФИАС).
 - SPA: основное меню сфокусировано на Dashboard / Lots / IngestRuns; технические страницы Notices и Map остаются доступными по маршрутам. Lots: пагинация, быстрые фильтры качества, сортировка по ₽/сотка, CSV, регион/муниципалитет/тип; LotDetail показывает ключевую сводку, источник ГИС как извещение и номер внутреннего лота - [frontend/src/](frontend/src).
+- **LAN dev (SPA с другого ПК):** в корневом `.env` задайте `VITE_API_BASE_URL` на URL API (не `localhost` машины клиента) и добавьте точный Origin Vite в `CORS_ALLOW_ORIGINS`; Vite подхватывает env из корня репозитория. См. раздел 5 «Доступ к dev с другого ПК в LAN».
 - TypeScript-проверка чистая, frontend tests проходят, Vite production build проходит. MapLibre вынесен в отдельный async chunk; предупреждение о крупном chunk теперь относится к лениво загружаемой карте.
 - **MVP GIS (`mvp_gis_*`, [`scripts/ingest_torgi.py`](backend/scripts/ingest_torgi.py)):** на PostgreSQL (Alembic head) проверены: discovery через `meta.json`, ингест одного среза `--source-url` (без синтеза соседних дней из `INGEST_SOURCE_URL`), фильтр `ZK`, Telegram для региона 72, ссылка НСПД по кадастру. Журнал: [WORKLOG.md](WORKLOG.md) (запись 2026-05-12 «Веха: MVP»).
 

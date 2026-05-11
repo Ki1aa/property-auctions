@@ -15,7 +15,11 @@ function jsonResponse(data: unknown): Response {
 }
 
 function parseUrl(url: string): URL {
-  return new URL(url);
+  try {
+    return new URL(url);
+  } catch {
+    return new URL(url, "http://localhost/");
+  }
 }
 
 function noticeCalls(): FetchCall[] {

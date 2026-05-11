@@ -6,6 +6,50 @@
 
 ---
 
+## 2026-05-11 - Веха: MVP dev стек проверен (LAN + push)
+
+**Итог:** Зафиксировано рабочее состояние dev-MVP: SPA по LAN с `VITE_API_BASE_URL` на хост API и `CORS_ALLOW_ORIGINS` под фактический Origin Vite; откат Vite-proxy (см. запись ниже). Backend CORS из [backend/app/config.py](backend/app/config.py); Vite читает `VITE_*` из корня репо ([frontend/vite.config.ts](frontend/vite.config.ts) `envDir`). Добавлены [dev-frontend.bat](dev-frontend.bat), [start-backend.bat](start-backend.bat) для Windows.
+
+**Проверки:** `pytest` 147 passed; `npm run test` + `npx tsc --noEmit` во frontend; ручной smoke пользователя.
+
+**Git:** изменения запушены в `origin/codex/gis_torgi_v3_pro`.
+
+---
+
+## 2026-05-11 - Откат Vite proxy: снова VITE_API_BASE_URL + CORS
+
+**Что сделано:** Убран `server.proxy` и `VITE_PROXY_API_TARGET` из схемы. [`frontend/src/api.ts`](frontend/src/api.ts) снова всегда использует `VITE_API_BASE_URL` (trim, без завершающего `/`) с fallback `http://localhost:8000`. [`frontend/vite.config.ts`](frontend/vite.config.ts) — только `envDir` на корень репо. [.env.example](.env.example), [AGENTS.md](AGENTS.md), [README.md](README.md) — описание LAN без прокси.
+
+**Причина:** прокси Vite ходит на `127.0.0.1` **на машине с Vite**; при API на другом хосте или если uvicorn не слушает локально — `ECONNREFUSED`.
+
+---
+
+## 2026-05-11 - LAN dev: Vite proxy /api + относительный API в DEV
+
+**Что сделано:** [`frontend/vite.config.ts`](frontend/vite.config.ts) — `server.proxy` для `/api` на `VITE_PROXY_API_TARGET` (default `http://127.0.0.1:8000`). [`frontend/src/api.ts`](frontend/src/api.ts) — в `import.meta.env.DEV` пустой base URL (запросы на тот же origin, что и Vite); в production — `VITE_API_BASE_URL` или fallback localhost. Тесты: относительные URL в mock fetch — [`LotsPage.test.tsx`](frontend/src/pages/LotsPage.test.tsx), [`TradesPage.test.tsx`](frontend/src/pages/TradesPage.test.tsx). Документация: [.env.example](.env.example), [AGENTS.md](AGENTS.md), [README.md](README.md).
+
+**Зачем:** доступ к SPA по LAN-IP без CORS и без жёсткой привязки фронта к `http://<ip>:8000` в dev.
+
+---
+
+## 2026-05-11 - LAN dev: VITE_API_BASE_URL из корня и CORS из .env
+
+**Что сделано:** [`frontend/vite.config.ts`](frontend/vite.config.ts) — `envDir` на корень репозитория, чтобы Vite подхватывал `VITE_API_BASE_URL` из корневого `.env`. [`backend/app/config.py`](backend/app/config.py) — `cors_allow_origins` / `CORS_ALLOW_ORIGINS`, метод `cors_origins_list()`. [`backend/app/main.py`](backend/app/main.py) — `CORSMiddleware.allow_origins` из settings. [`.env.example`](.env.example) — `CORS_ALLOW_ORIGINS`, комментарии к LAN; убран неиспользуемый `FRONTEND_API_BASE_URL`. Документация: [AGENTS.md](AGENTS.md), [README.md](README.md).
+
+**Проверки:** не запускались в этой сессии (ожидается ручной smoke: браузер с другого ПК + `curl` OPTIONS).
+
+---
+
+## 2026-05-11 - dev-frontend.bat для запуска Vite без PowerShell
+
+**Что сделано:** В корне репозитория добавлен [`dev-frontend.bat`](dev-frontend.bat): переход в `frontend`, вызов `npm.cmd run dev` через PATH или запасные пути (`F:\nodeJS`, `Program Files\nodejs`); опционально переменная окружения `NPM_CMD` для явного пути к `npm.cmd`.
+
+**Затронутые файлы:** `dev-frontend.bat`, `WORKLOG.md`.
+
+**Проверки:** не требовались (обёртка запуска).
+
+---
+
 ## 2026-05-12 - Веха: MVP GIS Torgi Monitor закрыт (ручная прод-проверка)
 
 **Итог:** После нескольких бессонных ночей зафиксирован **достигнутый MVP** для контура **ГИС Торги Monitor** в параллельной схеме `mvp_gis_*`: OpenData, устойчивый discovery через `meta.json`, загрузка **одного** среза без синтеза соседних несуществующих URL (`python scripts/ingest_torgi.py --source-url`, не через `INGEST_SOURCE_URL` на `data-*.json`), земельный фильтр **`ZK`**, запись в **PostgreSQL** при `alembic current == head`, **Telegram** с фокусом на **регион 72**, ссылка **НСПД/ПКК** по кадастровому номеру. Рыночные аналоги и полная интеграция НСПД в legacy `lots` остаются в roadmap.
