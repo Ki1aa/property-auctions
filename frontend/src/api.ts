@@ -13,7 +13,8 @@ import {
   OpenDataNoticeFacets,
 } from "./types";
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000") as string;
+const rawBase = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000") as string;
+const baseUrl = rawBase.trim().replace(/\/$/, "");
 
 export function getApiBaseUrl(): string {
   return baseUrl;

@@ -105,6 +105,14 @@ class Settings(BaseSettings):
     # Set false in production to avoid heavy work on process start.
     run_ingest_on_startup: bool = False
 
+    # Comma-separated browser origins for FastAPI CORSMiddleware (Vite dev URLs). Add LAN SPA origin when needed.
+    cors_allow_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174,"
+        "http://localhost:5175,http://127.0.0.1:5175,"
+        "http://localhost:5176,http://127.0.0.1:5176"
+    )
+
     # --- MVP GIS (mvp_gis_* tables, scripts/ingest_torgi.py) ---
     # Comma-separated biddTypeCode values treated as land for stage-1 filter (e.g. ZK).
     # Empty with ingest_land_filter_relaxed=false: production ingest refuses to start.
@@ -129,6 +137,9 @@ class Settings(BaseSettings):
         if v == "" or v is None:
             return "notice_only"
         return v
+
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
 
 
 settings = Settings()
