@@ -13,7 +13,7 @@ from app.config import settings
 from app.models_mvp import MvpGisLot, MvpGisLotVersion, MvpGisNotice
 from app.services.ingest.client import fetch_json_payload_with_meta
 from app.services.ingest.detail_parser import split_keywords
-from app.services.ingest.discovery import build_discovery_plan
+from app.services.ingest.discovery import _parse_dataset_file_url, build_discovery_plan
 from app.services.ingest.normalizer import normalize_lot
 from app.services.ingest.service import (
     _is_opendata_form,
@@ -120,6 +120,7 @@ async def run_mvp_ingest(
     *,
     dry_run: bool = False,
     limit: int | None = None,
+    data_file_url: str | None = None,
 ) -> dict[str, Any]:
     validate_land_filter_for_ingest(dry_run=dry_run)
 
@@ -135,21 +136,29 @@ async def run_mvp_ingest(
         "would_telegram": [],
         "filtered_telegram": [],
         "upserted": 0,
+        "would_upsert": 0,
     }
 
-    mode_value = (settings.ingest_mode or "operational").lower()
-    last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
-    discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
-    if discovery_plan.discovery_error:
-        stats["error"] = discovery_plan.discovery_error
-        return stats
-    if discovery_plan.discovery_warning:
-        logger.warning("OpenData discovery: %s", discovery_plan.discovery_warning)
-    if not discovery_plan.files:
-        stats["error"] = "No discovery files"
-        return stats
+    single_url = (data_file_url or "").strip()
+    if single_url:
+        # Explicit data-*.json only: bypasses discovery and INGEST_SOURCE_URL watermark synthesis.
+        file_ref = _parse_dataset_file_url(single_url, "cli_single")
+        stats["ingest_file_url"] = file_ref.source_url
+        stats["ingest_source_kind"] = file_ref.source_kind
+    else:
+        mode_value = (settings.ingest_mode or "operational").lower()
+        last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
+        discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
+        if discovery_plan.discovery_error:
+            stats["error"] = discovery_plan.discovery_error
+            return stats
+        if discovery_plan.discovery_warning:
+            logger.warning("OpenData discovery: %s", discovery_plan.discovery_warning)
+        if not discovery_plan.files:
+            stats["error"] = "No discovery files"
+            return stats
 
-    file_ref = discovery_plan.files[-1]
+        file_ref = discovery_plan.files[-1]
     payload, _payload_sha = await fetch_json_payload_with_meta(file_ref.source_url)
     if _is_torgi_opendata_error_envelope(payload):
         stats["error"] = str(payload.get("error"))
@@ -244,7 +253,7 @@ async def run_mvp_ingest(
             )
 
             if dry_run:
-                stats["upserted"] += 1
+                stats["would_upsert"] += 1
                 continue
 
             notice = _ensure_notice(
