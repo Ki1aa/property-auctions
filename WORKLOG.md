@@ -6,6 +6,14 @@
 
 ---
 
+## 2026-05-12 - OpenData discovery: meta.json как источник data-/structure-файлов
+
+**Что сделано:** [`backend/app/services/ingest/discovery.py`](backend/app/services/ingest/discovery.py) — для registry/card путей сначала загружается `meta.json` датасета; список срезов берётся только из `meta["data"][]` (поле `source` + `structure`), сопоставление `structure-*.json` с блоком `meta["structure"][]`; операционный/backfill-план **не синтезирует** URL по календарю (исключение: прямой override `INGEST_SOURCE_URL` на `data-*.json` — прежняя логика watermark). Расширен [`DiscoveryPlan`](backend/app/services/ingest/discovery.py): `meta_json_url`, `discovery_error`, `discovery_warning`, `available_data_urls`, `attempted_urls`; при ошибке — текст с рекомендациями по `TORGI_OPENDATA_*` / `INGEST_SOURCE_URL`. [`backend/app/services/ingest/service.py`](backend/app/services/ingest/service.py) и [`backend/app/services/mvp/pipeline.py`](backend/app/services/mvp/pipeline.py) обрабатывают `discovery_error` / логируют `discovery_warning`. Скрипт диагностики [`backend/scripts/torgi_discover.py`](backend/scripts/torgi_discover.py) + [`run_torgi_discovery_diagnostic`](backend/app/services/ingest/discovery.py). Тесты: [`backend/tests/test_discovery_meta.py`](backend/tests/test_discovery_meta.py), обновлён [`backend/tests/test_ingest_discovery.py`](backend/tests/test_ingest_discovery.py).
+
+**Проверки:** `pytest` — 146 passed.
+
+---
+
 ## 2026-05-11 - Очистка SQLite и повторная загрузка
 
 **Что сделано:** Резервная копия `data/app.db` в `data/backups/app_20260511_033234.db` (скрипт `backup_mvp_db.py` пропустил копирование из-за не-SQLite `DATABASE_URL` в окружении агента — использован ручной `Copy-Item`). Удалён `data/app.db`, пересоздана схема через `Base.metadata.create_all` (включая `mvp_gis_*`). Запущен legacy `run_ingest`: частично успешно (`upserted_count` 63, один файл failed — SSL `CERTIFICATE_VERIFY_FAILED` и/или ответ Торгов о недоступном срезе). `ingest_torgi.py` без записей в `.env` для `INGEST_LAND_FILTER_BIDD_TYPE_CODES` требует переменную; с override `ZK` discovery вернул ошибку по отсутствующему `data-...structure-...json` (срез ещё не опубликован).

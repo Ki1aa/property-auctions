@@ -140,6 +140,11 @@ async def run_mvp_ingest(
     mode_value = (settings.ingest_mode or "operational").lower()
     last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
     discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
+    if discovery_plan.discovery_error:
+        stats["error"] = discovery_plan.discovery_error
+        return stats
+    if discovery_plan.discovery_warning:
+        logger.warning("OpenData discovery: %s", discovery_plan.discovery_warning)
     if not discovery_plan.files:
         stats["error"] = "No discovery files"
         return stats

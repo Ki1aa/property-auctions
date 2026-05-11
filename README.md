@@ -4,7 +4,7 @@
 
 Система загружает данные ГИС Торги, сохраняет данные в локальную БД SQLite (на этапе разработки), предоставляет API, отображает список лотов и поддерживает Telegram-оповещения. Продуктовый контракт MVP описан в [docs/MVP_PRODUCT_CONTRACT.md](docs/MVP_PRODUCT_CONTRACT.md).
 
-**MVP GIS (параллельные таблицы `mvp_gis_*`):** ingest и read-only API не заменяют текущий `/api/lots`. Команды: `cd backend && python scripts/backup_mvp_db.py` (копия SQLite), `python scripts/ingest_torgi.py --dry-run --limit 50`. Поля и коды земли — черновик чеклиста в [docs/GIS_TORGI_FIELD_RESEARCH.md](docs/GIS_TORGI_FIELD_RESEARCH.md). Сводка: `GET http://localhost:8000/api/mvp/stats`.
+**MVP GIS (параллельные таблицы `mvp_gis_*`):** ingest и read-only API не заменяют текущий `/api/lots`. Команды: `cd backend && python scripts/backup_mvp_db.py` (копия SQLite), `python scripts/torgi_discover.py` (диагностика OpenData: meta.json и выбранные файлы), `python scripts/ingest_torgi.py --dry-run --limit 50`. Поля и коды земли — черновик чеклиста в [docs/GIS_TORGI_FIELD_RESEARCH.md](docs/GIS_TORGI_FIELD_RESEARCH.md). Сводка: `GET http://localhost:8000/api/mvp/stats`.
 
 Для MVP-показа рекомендуемый режим такой: ingest и интерфейс работают по всем регионам (`TARGET_REGION_CODES=`), а Telegram-оповещения ограничены Тюменской областью (`TELEGRAM_ALERT_REGION_CODES=72`).
 

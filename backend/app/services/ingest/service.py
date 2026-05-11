@@ -427,6 +427,10 @@ async def run_ingest(db: Session, mode: str | None = None) -> dict[str, int]:
     try:
         last_processed_to = _last_processed_data_to(db) if mode_value == "operational" else None
         discovery_plan = await build_discovery_plan(mode=mode_value, last_processed_to=last_processed_to)
+        if discovery_plan.discovery_error:
+            raise RuntimeError(discovery_plan.discovery_error)
+        if discovery_plan.discovery_warning:
+            logger.warning("OpenData discovery: %s", discovery_plan.discovery_warning)
         source_url = discovery_plan.files[-1].source_url if discovery_plan.files else settings.ingest_source_url
         run.source_url = source_url
         db.commit()
